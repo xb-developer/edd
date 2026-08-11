@@ -1,0 +1,45 @@
+{
+  "name": "edd-workbench-cloud-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Phase 1-3 multi-tenant control plane + upload/extraction pipeline + search/tags/collaboration: organizations, users, groups, matters, documents, tags, full-text search, Auth0 identity, Postgres RLS isolation, Secure Document Repository.",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "worker": "tsx watch src/worker.ts",
+    "build": "tsc",
+    "test": "node --import tsx --test test/isolation.test.ts test/pipeline.test.ts test/collaboration.test.ts test/rag-isolation.test.ts test/audit-log.test.ts test/extract-formats.test.ts test/upload-error.test.ts test/dev-auth-bypass.test.ts",
+    "db:migrate": "tsx src/db/migrate.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.687.0",
+    "@aws-sdk/s3-request-presigner": "^3.687.0",
+    "@kenjiuno/msgreader": "^1.23.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.1",
+    "jose": "^5.9.6",
+    "mailparser": "^3.7.2",
+    "mammoth": "^1.8.0",
+    "multer": "^2.0.1",
+    "officeparser": "^7.5.0",
+    "pdfjs-dist": "^6.2.108",
+    "pg": "^8.13.1",
+    "undici": "^8.9.0",
+    "word-extractor": "^1.0.4",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/mailparser": "^3.4.5",
+    "@types/multer": "^1.4.12",
+    "@types/node": "^22.7.4",
+    "@types/pg": "^8.11.10",
+    "@types/word-extractor": "^1.0.6",
+    "jszip": "^3.10.1",
+    "pdf-lib": "^1.17.1",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.3"
+  }
+}

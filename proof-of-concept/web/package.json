@@ -1,0 +1,23 @@
+{
+  "name": "edd-workbench-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Thin-client web SPA talking to cloud-backend (Section 3.1/4.1) — Auth0 login, upload, search, tags, ask. Separate from client/ (the desktop app's Electron-embedded UI) so neither build is put at risk by the other.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build"
+  },
+  "dependencies": {
+    "@auth0/auth0-react": "^2.2.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.2",
+    "typescript": "^5.6.3",
+    "vite": "^6.4.3"
+  }
+}

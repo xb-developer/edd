@@ -1,0 +1,44 @@
+{
+  "name": "xbundle-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Unified monorepo for the XBundle platform: Assemble (build), Create (edit), View (present).",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/assemble/server",
+    "apps/assemble/client",
+    "apps/edd-workbench/server",
+    "apps/edd-workbench/client",
+    "apps/edd-workbench/worker"
+  ],
+  "scripts": {
+    "dev:assemble:server": "npm run dev --workspace apps/assemble/server",
+    "dev:assemble:client": "npm run dev --workspace apps/assemble/client",
+    "dev:assemble:electron": "electron apps/assemble/electron/bootstrap.cjs",
+    "dev:assemble": "concurrently -n server,client,electron -c blue,green,magenta \"npm:dev:assemble:server\" \"npm:dev:assemble:client\" \"npm run wait-and-launch:assemble\"",
+    "wait-and-launch:assemble": "wait-on tcp:4410 http://localhost:5273 && npm run dev:assemble:electron",
+    "dev:edd-workbench:server": "npm run dev --workspace apps/edd-workbench/server",
+    "dev:edd-workbench:client": "npm run dev --workspace apps/edd-workbench/client",
+    "dev:edd-workbench:worker": "npm run dev --workspace apps/edd-workbench/worker",
+    "dev:edd-workbench": "concurrently -n server,client,worker -c blue,green,yellow \"npm:dev:edd-workbench:server\" \"npm:dev:edd-workbench:client\" \"npm:dev:edd-workbench:worker\"",
+    "migrate:edd-workbench": "npm run migrate --workspace @xbundle/edd-workbench-core",
+    "seed:edd-workbench:org": "npm run seed:org --workspace @xbundle/edd-workbench-core --",
+    "test": "vitest",
+    "test:run": "vitest run && npm run smoke --workspace @xbundle/edd-workbench-core",
+    "test:ui": "vitest --ui"
+  },
+  "devDependencies": {
+    "@vitest/ui": "^4.1.10",
+    "concurrently": "^9.1.0",
+    "electron": "^43.2.0",
+    "typescript": "^5.6.3",
+    "vitest": "^4.1.10",
+    "wait-on": "^8.0.1"
+  },
+  "overrides": {
+    "officeparser": {
+      "pdfjs-dist": "^6.2.108"
+    }
+  }
+}

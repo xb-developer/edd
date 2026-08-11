@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# CDK / Terraform generated & state — regenerable caches and live infra
+# state, never meant for version control (tfstate can carry sensitive
+# resource data; provider binary caches are large and platform-specific).
+cdk.out/
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+.terraform.lock.hcl
+
+# Environment files — real secrets/local config, never committed.
+# .env.example files are intentionally NOT ignored (they're safe templates).
+.env
+.env.local
+.env.*.local
+.env.production
+.env.development
+
+# Real business correspondence used for manual verification — not a
+# synthetic fixture, deliberately kept out of permanent git history.
+/test-data/
+
+# Coverage / logs / OS junk
+coverage/
+*.log
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+
+# Claude Code local session/settings state — machine-local, not project source.
+.claude/

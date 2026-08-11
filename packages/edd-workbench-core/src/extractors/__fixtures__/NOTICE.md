@@ -1,0 +1,13 @@
+These `.msg` fixture files (`sent.msg`, `test1.msg`, `attachmentsOrder.msg`) are copied from the [msgreader](https://github.com/HiraokaHyperTools/msgreader) project's own test suite (`test/` directory), used here under its Apache License 2.0. They're real, genuine Outlook message files the library's own authors use to validate correct parsing — not synthetic/hand-built data — which is exactly why they're used here as an independent source of truth for `msg.test.ts`'s expected values, cross-checked against that project's own `test1.json`/`sent.json`/`attachmentsOrder.json` expected-output fixtures rather than derived by hand.
+
+Copyright the msgreader project contributors. Licensed under the Apache License, Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0).
+
+`legacy01.doc` (renamed from `test01.doc`) is copied from the [node-word-extractor](https://github.com/morungos/node-word-extractor) project's own test suite (`__tests__/data/`), used here under its MIT License, for the same reason: a genuine legacy OLE2/CFB Word 97-2003 binary `.doc` file has no write-capable pure-JS library to build a fixture with, so a real sample from the library's own test corpus serves as ground truth for `doc.test.ts`'s legacy-binary-path assertions.
+
+Copyright the node-word-extractor project contributors (Stuart Watt). Licensed under the MIT License.
+
+`enron.pst` and `mtnman1965@outlook.com.ost` are copied from the [pst-extractor](https://github.com/epfromer/pst-extractor) project's own test suite (`src/__tests__/testdata/`), used here under its MIT License, for the same reason as the `.doc`/`.msg` fixtures above: no pure-JS library can *write* a byte-accurate PST/OST, so a real sample from the reading library's own test corpus is the only trustworthy ground truth for `pst.test.ts`'s assertions — cross-checked against that project's own `PSTMessage.spec.ts`/`PSTFolder.spec.ts`/`PSTAttachment.spec.ts` expected values (folder structure, subjects, senders, real attachment names/bytes), not derived from this extractor's own logic.
+
+Copyright the pst-extractor project contributors (Ed Pfromer). Licensed under the MIT License.
+
+Deliberately **not** duplicated into `apps/edd-workbench/worker/src/handlers/__fixtures__/` the way the smaller fixtures above are: at ~22 MB combined, these two files are an order of magnitude larger than every other fixture in this directory, and `ingest.test.ts`'s own PST integration tests read them from this one location (via a relative path up into `edd-workbench-core`) rather than paying that cost twice. A deliberate, documented exception to the usual per-package fixture copy, not an oversight.

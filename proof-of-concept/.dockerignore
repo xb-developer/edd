@@ -1,0 +1,16 @@
+node_modules
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+!**/.env.example
+**/data
+**/*.log
+.git
+.github
+infra
+client
+server
+electron
+cloud-backend/test
+cloud-backend/docs

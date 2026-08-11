@@ -1,0 +1,21 @@
+{
+  "name": "@xbundle/bundle-format",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@pdf-lib/standard-fonts": "^1.0.0",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^6.1.200"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.4",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.3"
+  }
+}

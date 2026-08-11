@@ -1,0 +1,32 @@
+{
+  "name": "xbundle-edd-workbench-infra",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "synth": "cdk synth",
+    "diff": "cdk diff",
+    "deploy": "cdk deploy",
+    "migrate": "node scripts/run-migrations.mjs"
+  },
+  "dependencies": {
+    "@aws-sdk/client-cloudformation": "^3.700.0",
+    "@aws-sdk/client-cloudfront": "^3.1104.0",
+    "@aws-sdk/client-ecs": "^3.700.0",
+    "@aws-sdk/client-s3": "^3.1104.0",
+    "@aws-sdk/client-secrets-manager": "^3.1104.0",
+    "aws-cdk-lib": "^2.169.0",
+    "constructs": "^10.4.2"
+  },
+  "devDependencies": {
+    "@aws-sdk/client-acm": "^3.1105.0",
+    "@aws-sdk/client-cloudwatch-logs": "^3.1104.0",
+    "@aws-sdk/client-rds": "^3.1105.0",
+    "@aws-sdk/client-route-53": "^3.1105.0",
+    "@types/node": "^22.7.4",
+    "aws-cdk": "^2.169.0",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.3"
+  }
+}

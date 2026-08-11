@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>EDD Workbench - Start your matter</title>
+<style>
+  :root{
+    --paper:#F5F5F3;
+    --panel:#FFFFFF;
+    --ink:#1B2130;
+    --ink-soft:#5B6272;
+    --line:#E1E3E8;
+    --navy:#1F2A44;
+    --navy-soft:#EEF1F6;
+    --seal:#A6362C;
+    --seal-soft:#F7E9E7;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:'Inter',system-ui,sans-serif;background:var(--paper);color:var(--ink);-webkit-font-smoothing:antialiased;}
+  .header{background:var(--navy);color:#fff;padding:28px 20px;text-align:center;}
+  .header h1{margin:0;font-size:26px;letter-spacing:0.02em;}
+  .header p{margin:8px 0 0;color:#D7DEEA;font-size:15px;font-style:italic;}
+  .wrap{max-width:640px;margin:0 auto;padding:32px 20px 60px;}
+  .lede{font-size:16px;line-height:1.6;color:var(--ink);}
+  .features{display:flex;flex-wrap:wrap;gap:10px;margin:24px 0;padding:0;list-style:none;}
+  .features li{background:var(--navy-soft);color:var(--navy);border-radius:20px;padding:6px 14px;font-size:13px;font-weight:600;}
+  .price-box{background:var(--seal-soft);border:2px solid var(--seal);border-radius:8px;padding:22px 24px;text-align:center;margin:28px 0;}
+  .price-box .amount{font-size:32px;font-weight:800;color:var(--seal);}
+  .price-box .terms{font-size:13px;color:var(--ink-soft);margin-top:6px;}
+  form{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:24px;display:flex;flex-direction:column;gap:14px;}
+  form h2{margin:0 0 4px;font-size:18px;color:var(--navy);}
+  label{font-size:13px;font-weight:600;color:var(--ink-soft);display:block;margin-bottom:4px;}
+  input{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:6px;font-size:15px;font-family:inherit;}
+  input:focus{outline:2px solid var(--navy);outline-offset:1px;}
+  button{background:var(--seal);color:#fff;border:none;border-radius:6px;padding:13px 18px;font-size:16px;font-weight:700;cursor:pointer;}
+  button:disabled{opacity:0.6;cursor:default;}
+  button:hover:not(:disabled){background:#8a2c24;}
+  .status{font-size:14px;padding:10px 12px;border-radius:6px;display:none;}
+  .status.error{display:block;background:var(--seal-soft);color:var(--seal);}
+  .status.info{display:block;background:var(--navy-soft);color:var(--navy);}
+  .small-print{font-size:12px;color:var(--ink-soft);margin-top:10px;text-align:center;}
+  footer{text-align:center;padding:18px;background:var(--navy);color:#D7DEEA;font-size:13px;}
+  .alpha-banner{background:#3a2a0c;color:#FBF0DC;text-align:center;font-size:13px;font-weight:600;padding:8px;letter-spacing:0.02em;}
+  .success{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:28px 24px;text-align:center;}
+  .success h2{color:var(--navy);margin-top:0;}
+</style>
+</head>
+<body>
+  <div class="alpha-banner">ALPHA / LOCAL TEST BUILD - no real payment is taken on this page</div>
+  <div class="header">
+    <h1>EDD WORKBENCH</h1>
+    <p>Fast, secure document review for matters that don't need an enterprise platform</p>
+  </div>
+
+  <div class="wrap">
+    <p class="lede">
+      Upload documents, get them organised, tagged and searchable within minutes.
+      Ask questions in plain English and get answers with citations, powered by AI
+      that never leaves our secure environment. Built for early case assessment and
+      first-pass review, not multi-terabyte litigation.
+    </p>
+
+    <ul class="features">
+      <li>Upload &amp; OCR</li>
+      <li>Tag &amp; Boolean search</li>
+      <li>Self-hosted AI Q&amp;A</li>
+      <li>5 users &middot; 5GB &middot; private</li>
+    </ul>
+
+    <div class="price-box">
+      <div class="amount">&pound;795 per matter</div>
+      <div class="terms">Up to 5 users and 5GB of documents, for up to 6 months. No setup fee, no user licences.</div>
+    </div>
+
+    <form id="signup-form">
+      <h2>Start your matter</h2>
+      <div>
+        <label for="contactName">Your name</label>
+        <input id="contactName" name="contactName" type="text" required autocomplete="name" />
+      </div>
+      <div>
+        <label for="firmName">Firm name</label>
+        <input id="firmName" name="firmName" type="text" required autocomplete="organization" />
+      </div>
+      <div>
+        <label for="email">Work email</label>
+        <input id="email" name="email" type="email" required autocomplete="email" />
+      </div>
+      <div id="status" class="status"></div>
+      <button id="submit-btn" type="submit">Sign up (test - no payment taken)</button>
+      <p class="small-print">
+        This alpha build simulates payment instead of charging a real card.
+        Your account and matter are created immediately, and you'll receive
+        a real email to set your password and log in.
+      </p>
+    </form>
+
+    <div id="success-panel" class="success" style="display:none;">
+      <h2>You're set up</h2>
+      <p id="success-message"></p>
+      <p class="small-print">Check your inbox for an email from Auth0 to set your password, then log in to the app.</p>
+    </div>
+  </div>
+
+  <footer>EDD WORKBENCH &middot; Questions? Get in touch before you sign up.</footer>
+
+<script>
+  // Local alpha build: no Stripe account exists yet, so signup goes
+  // straight to POST /api/leads/:id/mock-checkout instead of a real
+  // payment provider - see cloud-backend/src/routes/leads.ts for why that
+  // route can never run outside local dev. When a real Stripe Payment Link
+  // exists, replace this fetch chain with a redirect to it and let the
+  // Stripe webhook call provisionLead() instead - see cloud-backend/src/leads/provision.ts.
+
+  var form = document.getElementById("signup-form");
+  var statusEl = document.getElementById("status");
+  var submitBtn = document.getElementById("submit-btn");
+  var successPanel = document.getElementById("success-panel");
+  var successMessage = document.getElementById("success-message");
+
+  function showStatus(kind, message) {
+    statusEl.className = "status " + kind;
+    statusEl.textContent = message;
+  }
+
+  function resetButton() {
+    submitBtn.disabled = false;
+    submitBtn.textContent = "Sign up (test - no payment taken)";
+  }
+
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+    statusEl.className = "status";
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Please wait...";
+
+    var payload = {
+      contactName: document.getElementById("contactName").value.trim(),
+      firmName: document.getElementById("firmName").value.trim(),
+      email: document.getElementById("email").value.trim(),
+    };
+
+    function postJson(url, body) {
+      return fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: body ? JSON.stringify(body) : undefined,
+      }).then(function (res) {
+        return res.json().then(function (parsed) {
+          if (!res.ok) throw new Error(parsed.error || "request_failed");
+          return parsed;
+        });
+      });
+    }
+
+    postJson("/api/leads", payload)
+      .then(function (lead) {
+        return postJson("/api/leads/" + lead.id + "/mock-checkout");
+      })
+      .then(function (result) {
+        form.style.display = "none";
+        successPanel.style.display = "block";
+        successMessage.textContent =
+          "Your matter \"" + result.matter.name + "\" is ready at " + payload.firmName + ". " +
+          "A password-reset email has been sent to " + payload.email + ".";
+      })
+      .catch(function (err) {
+        var message = err.message === "invalid_email"
+          ? "Please enter a valid work email address."
+          : "Something went wrong - please try again, or get in touch.";
+        showStatus("error", message);
+        resetButton();
+      });
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,27 @@
+node_modules
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+.git
+# The whole infra/ tree, not just infra/edd-workbench/cdk.out — no app
+# image needs the CDK code at all, and excluding only cdk.out wasn't
+# reliable: cdk.out lives *inside* infra/edd-workbench, which is inside the
+# same repo root used as the Docker build context, so a synth run reading
+# its own in-progress cdk.out as part of that context (however briefly)
+# self-referentially nested asset copies inside each other until
+# `mkdir` hit ENAMETOOLONG. Excluding the whole parent directory removes
+# the self-reference instead of relying on precisely excluding the one
+# moving-target subdirectory inside it.
+infra
+# Real local-dev secrets, never baked into an image — discovered the hard
+# way: without this, the local .env got copied straight into the server
+# image, and loadEnv.ts's dotenv.config() then set DATABASE_URL from it
+# (dotenv doesn't override already-set vars, but DATABASE_URL wasn't one of
+# the vars the deployed task sets — only DB_HOST/PORT/USERNAME/PASSWORD
+# are), which resolveConnectionString prefers over the DB_HOST/PORT
+# fallback. The deployed migration task would have silently tried
+# connecting to localhost:5432 instead of the real RDS endpoint every time.
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.*.example

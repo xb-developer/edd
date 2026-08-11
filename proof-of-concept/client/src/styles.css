@@ -1,0 +1,318 @@
+:root{
+  --paper:#F5F5F3;
+  --panel:#FFFFFF;
+  --ink:#1B2130;
+  --row-h:34px;
+  --ink-soft:#5B6272;
+  --line:#E1E3E8;
+  --line-soft:#EDEEF1;
+  --navy:#1F2A44;
+  --navy-soft:#EEF1F6;
+  --seal:#A6362C;
+  --seal-soft:#F7E9E7;
+  --amber:#B4780C;
+  --amber-soft:#FBF0DC;
+  --slate:#5B6272;
+  --slate-soft:#EEF0F3;
+  --mono: 'IBM Plex Mono', ui-monospace, monospace;
+  --sans: 'Inter', system-ui, sans-serif;
+}
+*{box-sizing:border-box;}
+html,body,#root{height:100%;margin:0;}
+body{
+  font-family:var(--sans);
+  background:var(--paper);
+  color:var(--ink);
+  font-size:13px;
+  -webkit-font-smoothing:antialiased;
+}
+::selection{background:#D8DEEA;}
+button{font-family:inherit;font-size:inherit;cursor:pointer;}
+input,select{font-family:inherit;font-size:inherit;}
+/* minmax(0, 1fr) — not just 1fr — because grid tracks default to a min
+   size of "auto" (content's natural width), same gotcha as flex items. Left
+   unset, the single implicit column let main.layout grow to fit its widest
+   content (e.g. the register table with msg/xls selected) instead of being
+   capped at the viewport, so the whole layout silently overflowed sideways. */
+.app{display:grid;grid-template-rows:auto auto 1fr;grid-template-columns:minmax(0,1fr);height:100vh;overflow:hidden;}
+.app > main.layout{grid-row:-1;}
+
+/* HEADER */
+header.topbar{
+  display:flex;align-items:center;gap:20px;position:relative;
+  padding:12px 20px;background:var(--navy);color:#fff;
+  border-bottom:3px solid var(--seal);
+}
+.brand{display:flex;align-items:baseline;gap:8px;}
+.brand .mark{
+  width:22px;height:22px;border:1.5px solid #fff;border-radius:3px;
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--mono);font-size:11px;font-weight:600;flex:none;
+}
+.brand h1{font-size:15px;font-weight:600;margin:0;letter-spacing:.2px;}
+.brand .sub{font-size:11px;color:#B9C1D6;font-family:var(--mono);}
+.topbar-stats{display:flex;gap:18px;margin-left:auto;font-family:var(--mono);font-size:11.5px;color:#CBD2E3;}
+.topbar-stats b{color:#fff;font-weight:600;}
+.import-btn{
+  background:var(--seal);color:#fff;border:none;padding:8px 14px;border-radius:4px;
+  font-weight:600;font-size:12.5px;display:flex;align-items:center;gap:6px;
+}
+.import-btn:hover{background:#8f2e25;}
+.import-btn:disabled{opacity:.5;cursor:not-allowed;}
+
+.import-progress-banner{
+  display:flex;align-items:center;gap:14px;
+  padding:8px 20px;background:var(--amber-soft);border-bottom:1px solid #EAD6A5;
+}
+.import-progress-label{
+  font-size:11.5px;font-weight:600;color:#6b4c05;white-space:nowrap;flex:none;
+}
+.import-progress-track{
+  flex:1;height:6px;border-radius:3px;background:#fff;overflow:hidden;border:1px solid #EAD6A5;
+}
+.import-progress-fill{
+  height:100%;background:var(--seal);transition:width .2s ease;
+}
+
+.import-failures-banner{
+  background:var(--seal-soft);border-bottom:1px solid #E6C3BE;padding:10px 20px;max-height:160px;
+  overflow-y:auto;
+}
+.import-failures-head{display:flex;align-items:center;justify-content:space-between;gap:14px;}
+.import-failures-list{list-style:none;margin:8px 0 0;padding:0;font-size:11.5px;line-height:1.7;}
+.import-failures-list li{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+
+/* MAIN GRID */
+main.layout{display:flex;min-height:0;}
+.col{min-height:0;overflow-y:auto;}
+/* flex-basis for both columns comes from inline style (user-resizable via
+   the drag handles) — flex:0 0 auto here just stops them from growing or
+   shrinking away from whatever width was set. */
+.col-left{flex:0 0 auto;background:var(--panel);border-right:1px solid var(--line);padding:16px 14px;}
+.col-right{flex:0 0 auto;background:var(--panel);border-left:1px solid var(--line);display:flex;flex-direction:column;overflow:hidden;}
+.col-center{flex:1 1 auto;display:flex;flex-direction:column;min-width:200px;}
+
+.col-resize-handle{flex:0 0 6px;cursor:col-resize;background:var(--line-soft);position:relative;}
+.col-resize-handle:hover, .col-resize-handle.dragging{background:var(--navy-soft);}
+.row-resize-handle{flex:0 0 6px;cursor:row-resize;background:var(--line-soft);position:relative;}
+.row-resize-handle:hover, .row-resize-handle.dragging{background:var(--navy-soft);}
+.row-resize-handle::after{
+  content:'';position:absolute;top:2px;left:50%;transform:translateX(-50%);
+  height:2px;width:28px;border-radius:2px;background:var(--line);
+}
+.col-resize-handle::after{
+  content:'';position:absolute;left:2px;top:50%;transform:translateY(-50%);
+  width:2px;height:28px;border-radius:2px;background:var(--line);
+}
+
+h2.panel-title{
+  font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-soft);
+  margin:0 0 10px 0;font-weight:600;
+}
+.section{margin-bottom:24px;}
+
+.search-box{
+  width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:4px;
+  margin-bottom:14px;font-size:12.5px;background:var(--paper);
+}
+.search-box:focus{outline:none;border-color:var(--navy);background:#fff;}
+
+.mode-toggle{display:flex;border:1px solid var(--line);border-radius:4px;overflow:hidden;margin-bottom:10px;}
+.mode-toggle button{flex:1;padding:5px 0;border:none;background:var(--panel);font-size:11px;font-weight:600;color:var(--ink-soft);}
+.mode-toggle button.active{background:var(--navy);color:#fff;}
+.tag-filter-list{display:flex;flex-direction:column;gap:2px;}
+.tag-filter-row{display:flex;align-items:center;gap:7px;padding:5px 6px;border-radius:4px;font-size:12px;cursor:pointer;}
+.tag-filter-row:hover{background:var(--slate-soft);}
+.tag-filter-row input{accent-color:var(--navy);}
+.tag-filter-row .cnt{margin-left:auto;color:var(--ink-soft);font-family:var(--mono);font-size:10.5px;}
+.tag-dot{width:7px;height:7px;border-radius:50%;flex:none;}
+.empty-note{font-size:11.5px;color:var(--ink-soft);font-style:italic;padding:4px 2px;}
+.clear-filters{font-size:11px;color:var(--seal);background:none;border:none;padding:0;margin-top:8px;text-decoration:underline;}
+
+.export-btn{
+  width:100%;padding:9px 10px;border-radius:4px;border:1px solid var(--line);background:var(--paper);
+  font-size:12px;font-weight:600;color:var(--ink);text-align:left;margin-bottom:8px;display:flex;align-items:center;gap:8px;
+}
+.export-btn:hover{border-color:var(--navy);background:var(--navy-soft);}
+.export-btn .ico{font-family:var(--mono);color:var(--seal);}
+.export-btn:disabled{opacity:.4;cursor:not-allowed;}
+.export-hint{font-size:10.5px;color:var(--ink-soft);line-height:1.5;margin-top:2px;}
+.danger-btn:hover{border-color:var(--seal);background:var(--seal-soft);}
+.danger-btn .ico{color:var(--seal);font-family:var(--sans);}
+
+/* CENTER TABLE */
+.table-toolbar{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel);}
+.table-toolbar .count{font-family:var(--mono);font-size:11.5px;color:var(--ink-soft);}
+.drop-hint{font-size:11px;color:var(--ink-soft);margin-left:auto;}
+.table-wrap{flex:1;overflow:auto;position:relative;}
+table.reg{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed;}
+table.reg thead th{
+  position:sticky;top:0;background:#FAFAF9;border-bottom:1px solid var(--line);
+  text-align:left;padding:8px 10px;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;
+  color:var(--ink-soft);font-weight:600;white-space:nowrap;cursor:pointer;user-select:none;z-index:2;
+  overflow:hidden;text-overflow:ellipsis;
+}
+table.reg thead th:hover{color:var(--ink);}
+table.reg thead th.sorted{color:var(--navy);}
+table.reg tbody td{
+  padding:0 10px;border-bottom:1px solid var(--line-soft);vertical-align:middle;
+  height:var(--row-h);box-sizing:border-box;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+table.reg tbody tr{cursor:pointer;height:var(--row-h);}
+table.reg tbody tr:hover{background:var(--slate-soft);}
+table.reg tbody tr.active{background:var(--navy-soft);}
+.guid{font-family:var(--mono);font-weight:600;color:var(--navy);letter-spacing:.02em;}
+.fname{font-weight:500;}
+.fname .ext{color:var(--ink-soft);font-weight:400;}
+.muted{color:var(--ink-soft);}
+.tagchips{display:flex;flex-wrap:nowrap;gap:4px;max-width:220px;overflow-x:auto;overflow-y:hidden;height:var(--row-h);align-items:center;}
+.tagchips::-webkit-scrollbar{height:4px;}
+.chip{font-size:10px;padding:2px 7px;border-radius:9px;font-weight:600;white-space:nowrap;flex:none;}
+td.checkcell, th.checkcell{width:32px;text-align:center;padding:7px 6px;}
+input[type=checkbox]{accent-color:var(--navy);width:14px;height:14px;}
+
+.empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--ink-soft);text-align:center;padding:40px;}
+.empty-state .glyph{font-family:var(--mono);font-size:34px;color:var(--line);margin-bottom:10px;}
+.empty-state h3{font-size:14px;color:var(--ink);margin:0 0 6px;}
+.empty-state p{font-size:12px;max-width:280px;line-height:1.6;margin:0 0 14px;}
+.empty-state .import-btn{background:var(--navy);}
+
+/* RIGHT PANEL */
+.split-pane{display:flex;flex-direction:column;min-height:60px;overflow:hidden;flex:1;}
+.split-pane .pane-title{
+  flex:none;margin:0;padding:10px 16px 9px;border-bottom:1px solid var(--line);
+  font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-soft);font-weight:600;
+  background:var(--panel);
+}
+/* Same visual treatment as .pane-title's own padding/border/background, just
+   moved onto the row so a button can sit inline with it — the nested
+   .pane-title then has those stripped back off (this selector's equal
+   specificity to the one above wins on source order, since it comes later). */
+.pane-title-row{
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
+  padding:10px 16px 9px;border-bottom:1px solid var(--line);background:var(--panel);flex:none;
+}
+.pane-title-row .pane-title{padding:0;margin:0;border:none;background:none;}
+.pop-out-btn{
+  flex:none;font-size:10.5px;font-weight:600;color:var(--ink-soft);background:var(--panel);
+  border:1px solid var(--line);border-radius:4px;padding:3px 8px;display:flex;align-items:center;gap:4px;
+  white-space:nowrap;
+}
+.pop-out-btn:hover{border-color:var(--navy);color:var(--navy);background:var(--navy-soft);}
+.pop-out-btn:disabled{opacity:.4;cursor:not-allowed;}
+.pop-out-btn:disabled:hover{border-color:var(--line);color:var(--ink-soft);background:var(--panel);}
+.doc-nav-btns{display:flex;gap:6px;flex:none;}
+.panel-body{flex:1;overflow-y:auto;padding:16px;min-height:0;}
+
+/* VIEWER WINDOW (pop-out) — same PreviewPane component, but with the full
+   window height to work with instead of a small side panel, so the fixed
+   420px scroll-box caps that make sense embedded would just waste space here. */
+.viewer-window{height:100vh;display:flex;flex-direction:column;overflow:hidden;background:var(--paper);}
+.viewer-window .preview-html,
+.viewer-window .preview-text,
+.viewer-window .preview-table-wrap{max-height:none;}
+/* The PDF iframe (.preview-frame) is otherwise a fixed 360px, sized for the
+   small embedded side panel — in the pop-out it should fill whatever's left
+   below the metadata block instead. flex:1 on a column flex item lets
+   layout determine its height directly, overriding the fixed height. */
+.viewer-window .panel-body{display:flex;flex-direction:column;}
+.viewer-window .preview-frame{flex:1;height:auto;min-height:0;}
+.coding-ref{display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap;}
+.guid-badge-sm{
+  font-family:var(--mono);font-size:10.5px;font-weight:600;color:#fff;background:var(--navy);
+  padding:2px 7px;border-radius:3px;flex:none;
+}
+.coding-ref .ref-name{font-size:12px;font-weight:600;word-break:break-word;}
+.doc-head .guid-badge{
+  font-family:var(--mono);font-size:11px;font-weight:600;color:#fff;background:var(--navy);
+  padding:2px 8px;border-radius:3px;display:inline-block;margin-bottom:6px;
+}
+.doc-head .dname{font-size:13.5px;font-weight:600;word-break:break-word;}
+.meta-grid{display:grid;grid-template-columns:auto 1fr;gap:5px 10px;font-size:11.5px;margin-top:10px;}
+.meta-grid dt{color:var(--ink-soft);}
+.meta-grid dd{margin:0;word-break:break-word;}
+.no-selection{color:var(--ink-soft);font-size:12px;text-align:center;padding:40px 14px;}
+
+.preview-frame{width:100%;height:360px;border:1px solid var(--line);border-radius:4px;background:#fff;}
+.preview-html{border:1px solid var(--line);border-radius:4px;padding:14px;background:#fff;max-height:420px;overflow:auto;font-size:12px;line-height:1.6;}
+.preview-html table{border-collapse:collapse;font-size:11px;}
+.preview-html td, .preview-html th{border:1px solid var(--line);padding:3px 6px;}
+.preview-html img{max-width:100%;}
+.preview-img{max-width:100%;border:1px solid var(--line);border-radius:4px;}
+.preview-text{border:1px solid var(--line);border-radius:4px;padding:12px;background:#fff;max-height:420px;overflow:auto;font-family:var(--mono);font-size:11.5px;white-space:pre-wrap;}
+.preview-sheet-tabs{display:flex;gap:4px;margin-bottom:8px;flex-wrap:wrap;}
+.preview-sheet-tabs button{padding:4px 10px;border:1px solid var(--line);border-radius:4px;background:var(--panel);font-size:11px;font-weight:600;color:var(--ink-soft);}
+.preview-sheet-tabs button.active{background:var(--navy);color:#fff;border-color:var(--navy);}
+.preview-table-wrap{overflow:auto;max-height:420px;border:1px solid var(--line);border-radius:4px;}
+.preview-table{border-collapse:collapse;font-size:11px;}
+.preview-table td, .preview-table th{border:1px solid var(--line);padding:3px 6px;white-space:nowrap;}
+.preview-unsupported{border:1px dashed var(--line);border-radius:4px;padding:24px;text-align:center;color:var(--ink-soft);font-size:12px;}
+.slide-block{border:1px solid var(--line-soft);border-radius:4px;padding:8px 10px;margin-bottom:8px;}
+.slide-block .slide-num{font-family:var(--mono);font-size:10px;color:var(--seal);font-weight:600;}
+
+/* CODING PANEL */
+.tag-toggle-grid{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;}
+.tag-toggle{padding:5px 10px;border-radius:14px;font-size:11.5px;font-weight:600;border:1px solid var(--line);background:var(--panel);color:var(--ink-soft);}
+.tag-toggle.on{border-color:transparent;color:#fff;}
+.custom-tag-row{display:flex;gap:6px;margin-bottom:16px;}
+.custom-tag-row input{flex:1;padding:6px 8px;border:1px solid var(--line);border-radius:4px;font-size:12px;}
+.custom-tag-row button{padding:6px 12px;border-radius:4px;border:1px solid var(--navy);background:var(--navy);color:#fff;font-weight:600;font-size:12px;}
+.bulk-note{background:var(--amber-soft);border:1px solid #EAD6A5;color:#6b4c05;padding:8px 10px;border-radius:4px;font-size:11.5px;margin-bottom:12px;}
+
+.row-delete-btn{
+  border:1px solid var(--line);background:var(--panel);border-radius:4px;width:22px;height:22px;
+  display:inline-flex;align-items:center;justify-content:center;font-size:12px;color:var(--ink-soft);padding:0;
+}
+.row-delete-btn:hover{background:var(--seal-soft);color:var(--seal);border-color:var(--seal);}
+
+/* EMAIL PREVIEW (.eml / .msg) */
+.email-head{
+  border:1px solid var(--line);border-radius:4px;padding:10px 12px;margin-bottom:10px;
+  font-size:12px;background:#FAFAF9;display:flex;flex-direction:column;gap:3px;
+}
+.email-head .email-label{display:inline-block;width:52px;color:var(--ink-soft);font-weight:600;font-size:10px;text-transform:uppercase;}
+.email-attachments{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;}
+
+/* MATTER PICKER */
+.matter-screen{
+  height:100vh;display:flex;align-items:center;justify-content:center;background:var(--paper);
+}
+.matter-card{
+  width:420px;max-width:90vw;background:var(--panel);border:1px solid var(--line);border-radius:8px;
+  padding:28px 26px;box-shadow:0 4px 24px rgba(27,33,48,.08);
+}
+.matter-card h1{font-size:16px;font-weight:600;margin:0;color:var(--ink);}
+.matter-list{display:flex;flex-direction:column;gap:6px;max-height:280px;overflow-y:auto;}
+.matter-list-item{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:10px 12px;border:1px solid var(--line);border-radius:4px;background:var(--paper);
+  text-align:left;font-size:12.5px;font-weight:600;color:var(--ink);cursor:pointer;
+}
+.matter-list-item:hover{border-color:var(--navy);background:var(--navy-soft);}
+.matter-list-item .matter-name{font-weight:600;flex:1;}
+.matter-list-item .muted{margin-left:auto;}
+.matter-delete{
+  border:1px solid var(--line);background:var(--panel);border-radius:4px;padding:4px 9px;
+  font-size:11px;font-weight:600;color:var(--ink-soft);
+}
+.matter-delete:hover{background:var(--seal-soft);color:var(--seal);border-color:var(--seal);}
+
+/* ASK PANEL */
+.ask-overlay{
+  position:fixed;inset:0;background:rgba(27,33,48,.45);z-index:50;
+  display:flex;align-items:flex-start;justify-content:center;padding-top:8vh;
+}
+.ask-panel{
+  width:640px;max-width:92vw;max-height:80vh;overflow-y:auto;background:var(--panel);
+  border-radius:8px;border:1px solid var(--line);box-shadow:0 10px 40px rgba(27,33,48,.25);padding:22px 24px;
+}
+.ask-panel-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;}
+.ask-btn{
+  background:#fff;color:var(--navy);border:1px solid rgba(255,255,255,.5);padding:8px 14px;border-radius:4px;
+  font-weight:600;font-size:12.5px;display:flex;align-items:center;gap:6px;
+}
+.ask-btn:hover{background:var(--navy-soft);}
+
+::-webkit-scrollbar{width:10px;height:10px;}
+::-webkit-scrollbar-thumb{background:#D6D8DD;border-radius:6px;border:2px solid var(--panel);}
+::-webkit-scrollbar-track{background:transparent;}

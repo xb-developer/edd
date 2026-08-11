@@ -1,0 +1,28 @@
+# Copy to terraform.tfvars (gitignored) and fill in real values, or supply
+# these as TF_VAR_* environment variables / a CI secrets store instead.
+# Never commit a filled-in terraform.tfvars.
+
+aws_region = "eu-west-2"
+
+# Built by the CI/CD pipeline from cloud-backend/ (Section 9) — this plan
+# doesn't publish images itself, only deploys whatever URI you give it.
+api_image    = "123456789012.dkr.ecr.eu-west-2.amazonaws.com/edd-workbench-api:latest"
+worker_image = "123456789012.dkr.ecr.eu-west-2.amazonaws.com/edd-workbench-worker:latest"
+
+# See cloud-backend/docs/auth0-setup.md for how these are created.
+auth0_domain               = "your-tenant.eu.auth0.com"
+auth0_audience              = "https://api.edd-workbench.example.com"
+auth0_mgmt_client_id        = "REPLACE_ME"
+auth0_mgmt_client_secret    = "REPLACE_ME" # prefer TF_VAR_auth0_mgmt_client_secret instead of writing this here
+auth0_platform_admin_claim = "https://edd-workbench.example.com/platform_admin"
+
+# Section 14's LLM decision is resolved: self-hosted only, no external API
+# calls, ever. module.rag provisions the GPU instance itself and computes
+# OLLAMA_BASE_URL directly - no variable for it here.
+
+# Leave null until a real domain + ACM cert exist (Section 8.1) - the ALB
+# still works over plain HTTP for initial bring-up without either.
+acm_certificate_arn = null
+
+deletion_protection = false # set true for staging/production
+multi_az            = false # set true for staging/production

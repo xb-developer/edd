@@ -75,6 +75,32 @@ function copyStylesInto(pipDocument: Document): void {
   }
 }
 
+/**
+ * Closes a matter's pop-out viewer window (if one is open) from OUTSIDE the
+ * hook's own component instance — e.g. on logout, where the workspace shell
+ * has no access to `useViewerWindow`'s internal `windowHandleRef` (that's
+ * private to whichever `MatterDetail` mount owns it). Uses the same
+ * `BroadcastChannel`-based close the hook's own `closeWindowAndNotify`
+ * relies on, which already tolerates a stale/lost `Window` handle (see this
+ * file's own unmount-cleanup comment) — so no direct handle is needed here
+ * either. Also clears the matter's own sessionStorage keys, so a logout
+ * genuinely leaves no client-side trace behind, not just a closed window.
+ *
+ * PiP mode isn't reachable this way (it shares the opener's JS realm, with
+ * no broadcast channel involved at all) — acceptable here since PiP state
+ * is never persisted across a reload anyway (see this hook's own doc
+ * comment), so it carries no residual client-side data to clear regardless.
+ */
+export function closeViewerWindowForMatter(matterId: string): void {
+  const sessionId = sessionStorage.getItem(sessionStorageKey(matterId));
+  sessionStorage.removeItem(sessionStorageKey(matterId));
+  sessionStorage.removeItem(openFlagKey(matterId));
+  if (!sessionId) return;
+  const channel = openViewerChannel();
+  postViewerMessage(channel, { type: "close", sessionId });
+  channel.close();
+}
+
 export interface UseViewerWindowResult {
   state: PopoutState;
   /** Renamed from popupBlockedError — a PiP rejection is virtually always "not called synchronously in a user gesture," not a popup-blocker setting, so the old copy would be actively misleading for that path. */
@@ -86,6 +112,18 @@ export interface UseViewerWindowResult {
   /** Portal target inside the PiP window's own document — non-null only while state === "pip". Render via `createPortal(<...>, pipContainer)`. */
   pipContainer: HTMLDivElement | null;
   dockBack: () => void;
+  /**
+   * A real pop-out window has no OS-level "always on top" the way PiP does
+   * — clicking anywhere in the main window (including re-selecting the
+   * row that's already selected, which doesn't itself change
+   * selectedDocumentId) naturally gives the main window focus and drops
+   * the pop-out behind it. Callers should call this from the table row's
+   * own onClick, alongside setSelectedDocumentId, so every row click hands
+   * focus back to the pop-out — not just ones that change the selection
+   * (those already get it from the selectedDocumentId effect below too;
+   * calling this again there is harmless).
+   */
+  focusPopout: () => void;
 }
 
 /**
@@ -190,11 +228,20 @@ export function useViewerWindow(matterId: string, selectedDocumentId: string | n
   // window.open() path — PiP shares this same React tree, so a selection
   // change just re-renders whatever's inside pipContainer directly, no
   // channel involved.
+  //
+  // Also re-focuses the pop-out here — clicking a row in the main window's
+  // table naturally gives the MAIN window focus as an ordinary side effect
+  // of the click, which would otherwise drop the pop-out behind it. A
+  // regular window has no OS-level "always on top" the way a real PiP
+  // window does, so this is the closest practical equivalent: immediately
+  // after the row-selection that just fired is processed, hand focus back
+  // to the pop-out so it's the one left on top, now showing that selection.
   useEffect(() => {
     if (state !== "open") return;
     const channel = openViewerChannel();
     postViewerMessage(channel, { type: "select", sessionId, matterId, documentId: selectedDocumentId });
     channel.close();
+    windowHandleRef.current?.focus();
   }, [state, sessionId, matterId, selectedDocumentId]);
 
   const closeWindowAndNotify = useCallback(() => {
@@ -222,7 +269,15 @@ export function useViewerWindow(matterId: string, selectedDocumentId: string | n
       // Called synchronously in the click handler, no `await` first — an
       // awaited token fetch or similar before this call is a real, easy way
       // to trigger the popup blocker.
-      const handle = window.open(buildViewerWindowUrl({ matterId, documentId, sessionId }), "edd-workbench-viewer");
+      // availHeight (not the raw screen.height) excludes the OS taskbar/
+      // chrome — the real usable height, matching the PiP path's own
+      // requestWindow height below. Width stays at the same 420 the PiP
+      // path already uses; only height was asked for.
+      const handle = window.open(
+        buildViewerWindowUrl({ matterId, documentId, sessionId }),
+        "edd-workbench-viewer",
+        `width=420,height=${window.screen.availHeight}`,
+      );
       if (!handle) {
         setPopOutError("Your browser blocked the pop-out window. Allow pop-ups for this site and try again.");
         return;
@@ -242,8 +297,24 @@ export function useViewerWindow(matterId: string, selectedDocumentId: string | n
     setPopOutError(null);
     try {
       // Same synchronous-user-gesture constraint as window.open() above —
-      // no await before this call.
-      const pipWindow = await pip.requestWindow({ width: 420, height: 640 });
+      // no await before this call. availHeight (not screen.height) is the
+      // real usable height, excluding the OS taskbar/chrome — same
+      // reasoning as the window.open() fallback below.
+      const pipWindow = await pip.requestWindow({ width: 420, height: window.screen.availHeight });
+      // requestWindow's own size options are only a hint Chrome doesn't
+      // always honor exactly (PiP windows have historically clamped to a
+      // smaller default) — an explicit resizeTo() on the real returned
+      // window is meant to force the same full-height result window.open()
+      // already gets below. Calling it immediately (in the same tick
+      // requestWindow resolves) turned out to have no effect — Chrome
+      // appears to still be settling the window's own initial placement at
+      // that point and silently ignores the resize. Deferred a couple of
+      // frames so it runs after that initial layout has actually finished.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          pipWindow.resizeTo(420, window.screen.availHeight);
+        });
+      });
       pipWindowRef.current = pipWindow;
       copyStylesInto(pipWindow.document);
       pipWindow.document.body.className = "viewer-window";
@@ -295,5 +366,9 @@ export function useViewerWindow(matterId: string, selectedDocumentId: string | n
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [matterId]);
 
-  return { state, popOutError, popOut, pipSupported, popOutPiP, pipContainer, dockBack };
+  const focusPopout = useCallback(() => {
+    windowHandleRef.current?.focus();
+  }, []);
+
+  return { state, popOutError, popOut, pipSupported, popOutPiP, pipContainer, dockBack, focusPopout };
 }

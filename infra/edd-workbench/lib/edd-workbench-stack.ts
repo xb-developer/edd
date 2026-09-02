@@ -12,6 +12,10 @@ import * as cloudfront from "aws-cdk-lib/aws-cloudfront";
 import * as origins from "aws-cdk-lib/aws-cloudfront-origins";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as acm from "aws-cdk-lib/aws-certificatemanager";
+import * as iam from "aws-cdk-lib/aws-iam";
+import * as autoscaling from "aws-cdk-lib/aws-autoscaling";
+import * as servicediscovery from "aws-cdk-lib/aws-servicediscovery";
+import * as scheduler from "aws-cdk-lib/aws-scheduler";
 
 export interface EddWorkbenchStackProps extends cdk.StackProps {
   /** e.g. "staging", "prod" — used in resource names (S3 buckets, queues). */
@@ -172,6 +176,37 @@ export class EddWorkbenchStack extends cdk.Stack {
       deadLetterQueue: { queue: exportDlq, maxReceiveCount: 5 },
     });
 
+    // A separate queue/service from ingest, deliberately — the whole point
+    // is that a slow OCR job (Amazon Textract's async job can take tens of
+    // seconds to a few minutes) must never block the shared ingest queue's
+    // fast eml/docx/etc extractors sitting behind it in line. Visibility
+    // timeout covers the ocr-service's own worst-case polling window
+    // (~5 minutes, see apps/edd-workbench/ocr-service/src/textract.ts)
+    // with real margin, same "outlast the worst realistic job" reasoning
+    // as the export queue above.
+    const ocrDlq = new sqs.Queue(this, "OcrDlq", { queueName: `edd-workbench-${environmentName}-ocr-dlq` });
+    const ocrQueue = new sqs.Queue(this, "OcrQueue", {
+      queueName: `edd-workbench-${environmentName}-ocr`,
+      visibilityTimeout: cdk.Duration.minutes(10),
+      deadLetterQueue: { queue: ocrDlq, maxReceiveCount: 5 },
+    });
+
+    // The embedding service (below) is only warm on a schedule (business
+    // hours) — a message that arrives outside that window fails fast
+    // (connection refused, no task running) and must be retried until the
+    // service comes back, not just a handful of times like every other
+    // queue here. 15-minute visibility timeout x maxReceiveCount 50 gives
+    // ~12.5 hours of retry runway, covering a single overnight gap in the
+    // default schedule; a message arriving right before a weekend can
+    // still exhaust into the DLQ before Monday — a known v1 limitation,
+    // not a design goal, worth a DLQ redrive/alarm once this is in real use.
+    const embeddingDlq = new sqs.Queue(this, "EmbeddingDlq", { queueName: `edd-workbench-${environmentName}-embedding-dlq` });
+    const embeddingQueue = new sqs.Queue(this, "EmbeddingQueue", {
+      queueName: `edd-workbench-${environmentName}-embedding`,
+      visibilityTimeout: cdk.Duration.minutes(15),
+      deadLetterQueue: { queue: embeddingDlq, maxReceiveCount: 50 },
+    });
+
     // --- Secrets: Auth0 --------------------------------------------------
     // CDK-provisioned (not a pre-existing out-of-band secret) so `cdk
     // deploy` alone is enough to create it — the placeholder values below
@@ -183,6 +218,25 @@ export class EddWorkbenchStack extends cdk.Stack {
       secretObjectValue: {
         issuerBaseUrl: cdk.SecretValue.unsafePlainText("REPLACE_ME_POST_DEPLOY"),
         audience: cdk.SecretValue.unsafePlainText("REPLACE_ME_POST_DEPLOY"),
+      },
+    });
+
+    // Separate from Auth0Config above (JWT validation) — this is a
+    // Machine-to-Machine Auth0 Application authorized for the Management
+    // API (scopes read:organization_members, read:users), used only to list
+    // an organization's real members for the matter-access "candidates"
+    // dropdown (see auth0Management.ts). Auth0 is the sole source of truth
+    // for org membership here — no local mirror table. Placeholder values
+    // below must be overwritten post-deploy once that M2M application is
+    // created in the Auth0 dashboard; auth0Management.ts reads its
+    // credentials lazily (not at server startup), so a real deploy doesn't
+    // crash-loop while this is still a placeholder — only the candidates
+    // endpoint itself fails until it's filled in.
+    const auth0ManagementConfig = new secretsmanager.Secret(this, "Auth0ManagementConfig", {
+      secretName: `edd-workbench-${environmentName}-auth0-management`,
+      secretObjectValue: {
+        clientId: cdk.SecretValue.unsafePlainText("REPLACE_ME_POST_DEPLOY"),
+        clientSecret: cdk.SecretValue.unsafePlainText("REPLACE_ME_POST_DEPLOY"),
       },
     });
 
@@ -205,6 +259,13 @@ export class EddWorkbenchStack extends cdk.Stack {
     // NOTICE.md) — genuinely useful for pst.test.ts/ingest.test.ts, never
     // needed inside a deployed api/worker image.
     const dockerAssetExcludes = ["infra", "node_modules", "**/node_modules", "**/.env", "**/.env.*", "**/*.pst", "**/*.ost"];
+
+    // A literal, not derived from the EmbeddingService construct defined
+    // later in this file — Cloud Map private-DNS names are deterministic
+    // ({serviceName}.{namespaceName}), so anything needing this URL
+    // (the worker's own environment, set above the embedding service's own
+    // declaration) doesn't need a forward reference to that construct.
+    const EMBEDDING_SERVICE_INTERNAL_URL = "http://embedding.edd-workbench.internal:8000";
 
     // Shared by the api service and the migration task below — one image,
     // one Dockerfile, not two separate builds of the same server code.
@@ -252,6 +313,8 @@ export class EddWorkbenchStack extends cdk.Stack {
           DB_PASSWORD: ecs.Secret.fromSecretsManager(appDbSecret, "password"),
           AUTH0_ISSUER_BASE_URL: ecs.Secret.fromSecretsManager(auth0Config, "issuerBaseUrl"),
           AUTH0_AUDIENCE: ecs.Secret.fromSecretsManager(auth0Config, "audience"),
+          AUTH0_MGMT_CLIENT_ID: ecs.Secret.fromSecretsManager(auth0ManagementConfig, "clientId"),
+          AUTH0_MGMT_CLIENT_SECRET: ecs.Secret.fromSecretsManager(auth0ManagementConfig, "clientSecret"),
         },
       },
       publicLoadBalancer: true,
@@ -295,6 +358,12 @@ export class EddWorkbenchStack extends cdk.Stack {
       environment: {
         EDD_WORKBENCH_INGEST_QUEUE_URL: ingestQueue.queueUrl,
         EDD_WORKBENCH_EXPORT_QUEUE_URL: exportQueue.queueUrl,
+        EDD_WORKBENCH_OCR_QUEUE_URL: ocrQueue.queueUrl,
+        EDD_WORKBENCH_EMBEDDING_QUEUE_URL: embeddingQueue.queueUrl,
+        // Deterministic Cloud Map DNS name (see EmbeddingService below) —
+        // a literal, not a reference to that construct, so this container
+        // definition doesn't need to be declared after it.
+        EMBEDDING_SERVICE_URL: EMBEDDING_SERVICE_INTERNAL_URL,
         DB_HOST: database.instanceEndpoint.hostname,
         DB_PORT: database.instanceEndpoint.port.toString(),
       },
@@ -313,6 +382,29 @@ export class EddWorkbenchStack extends cdk.Stack {
     });
     ingestQueue.grantConsumeMessages(workerTaskDefinition.taskRole);
     exportQueue.grantConsumeMessages(workerTaskDefinition.taskRole);
+    // The worker isn't just a consumer of its own ingest queue — expanding
+    // a container/attachment into child documents re-enqueues each one so
+    // it gets fully processed by re-entering handleIngestMessage (see
+    // containerExpansion.ts's expandMembers). Missing this grant doesn't
+    // fail loudly: the child row's own INSERT/S3 upload succeed, then
+    // SendMessageCommand throws AccessDenied, which (correctly) rolls back
+    // that one member's transaction — so every real attachment/zip-member/
+    // PST-message-attachment silently vanishes instead of ever appearing,
+    // with no error visible anywhere until per-member failures started
+    // being logged. Confirmed for real via CloudWatch: every failure this
+    // session's "zip/msg/PST not working" report traced back to exactly
+    // this missing grant, not application logic.
+    ingestQueue.grantSendMessages(workerTaskDefinition.taskRole);
+    // ingest.ts hands a text-layer-less pdf or an image/tiff off to the ocr
+    // queue instead of processing it in-process — see that file's own
+    // comment on why (avoiding blocking this queue behind a slow OCR job).
+    ocrQueue.grantSendMessages(workerTaskDefinition.taskRole);
+    // The worker both sends (ingest.ts's own hand-off) and consumes (its
+    // third consumeQueue loop, handlers/embedding.ts) this queue — unlike
+    // OCR, embedding has no wrapper service of its own to hold that grant
+    // instead (see embedding.ts's own comment on why it lives here).
+    embeddingQueue.grantSendMessages(workerTaskDefinition.taskRole);
+    embeddingQueue.grantConsumeMessages(workerTaskDefinition.taskRole);
     documentsBucket.grantReadWrite(workerTaskDefinition.taskRole);
     database.connections.allowDefaultPortFrom(workerService, "Worker service to RDS");
 
@@ -327,6 +419,280 @@ export class EddWorkbenchStack extends cdk.Stack {
         { lower: 5, change: +1 },
         { lower: 20, change: +2 },
       ],
+    });
+
+    // --- OCR service -------------------------------------------------------
+    // A genuinely separate Fargate service from the worker above, consuming
+    // its own queue — see ocrQueue's own comment for why this can't just be
+    // a third consumeQueue loop bolted onto the worker process. Exposes a
+    // small REST API too (POST /ocr, GET /health) — the stable, engine-
+    // agnostic OCR contract (currently backed by Amazon Textract; swappable
+    // later without touching ingest.ts or this queue's consumer at all) —
+    // but that's not behind the ALB/CloudFront: nothing outside the VPC
+    // needs to call it directly today, only the queue-driven path in
+    // production. See apps/edd-workbench/ocr-service for the actual code.
+    const ocrTaskDefinition = new ecs.FargateTaskDefinition(this, "OcrTaskDefinition", {
+      cpu: 512,
+      memoryLimitMiB: 1024,
+    });
+    ocrTaskDefinition.addContainer("ocr", {
+      image: ecs.ContainerImage.fromAsset("../..", {
+        file: "apps/edd-workbench/ocr-service/Dockerfile",
+        exclude: dockerAssetExcludes,
+      }),
+      logging: ecs.LogDrivers.awsLogs({ streamPrefix: "edd-workbench-ocr" }),
+      environment: {
+        EDD_WORKBENCH_OCR_QUEUE_URL: ocrQueue.queueUrl,
+        EDD_WORKBENCH_EMBEDDING_QUEUE_URL: embeddingQueue.queueUrl,
+        DB_HOST: database.instanceEndpoint.hostname,
+        DB_PORT: database.instanceEndpoint.port.toString(),
+      },
+      secrets: {
+        DB_USERNAME: ecs.Secret.fromSecretsManager(appDbSecret, "username"),
+        DB_PASSWORD: ecs.Secret.fromSecretsManager(appDbSecret, "password"),
+      },
+    });
+    const ocrService = new ecs.FargateService(this, "OcrService", {
+      cluster,
+      serviceName: "ocr",
+      taskDefinition: ocrTaskDefinition,
+      desiredCount: 1,
+      circuitBreaker: { rollback: true },
+      minHealthyPercent: 0, // single-task queue consumer, same reasoning as WorkerService
+    });
+    ocrQueue.grantConsumeMessages(ocrTaskDefinition.taskRole);
+    // A successful OCR is itself a trigger for the embedding hand-off —
+    // see ocrQueue.ts's own comment for why (mirrors ingest.ts's own
+    // 'ready' hand-off for every other extractor).
+    embeddingQueue.grantSendMessages(ocrTaskDefinition.taskRole);
+    // Read-only — unlike the worker, ocr-service never writes derived
+    // artifacts back to S3, only a DB row (its extracted text/status).
+    documentsBucket.grantRead(ocrTaskDefinition.taskRole);
+    database.connections.allowDefaultPortFrom(ocrService, "OCR service to RDS");
+    // Textract's Start/GetDocumentTextDetection don't support resource-level
+    // ARN scoping — "*" is the documented/only option for these actions.
+    ocrTaskDefinition.taskRole.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: ["textract:StartDocumentTextDetection", "textract:GetDocumentTextDetection"],
+        resources: ["*"],
+      }),
+    );
+
+    // Same "scale on backlog depth, not CPU" reasoning as the worker above
+    // — OCR is I/O-bound waiting on Textract, not CPU-bound.
+    const ocrScaling = ocrService.autoScaleTaskCount({ minCapacity: 1, maxCapacity: 5 });
+    ocrScaling.scaleOnMetric("ScaleOnOcrBacklog", {
+      metric: ocrQueue.metricApproximateNumberOfMessagesVisible(),
+      scalingSteps: [
+        { upper: 0, change: -1 },
+        { lower: 5, change: +1 },
+        { lower: 20, change: +2 },
+      ],
+    });
+
+    // --- Embedding service (self-hosted Qwen3-Embedding-8B via vLLM) ------
+    // A genuinely different compute shape from everything else in this
+    // stack: Fargate has no GPU support at all, so this needs real EC2
+    // capacity, not another Fargate task. Added as an EC2 capacity
+    // provider on the SAME cluster (not a separate cluster/orchestrator —
+    // there's no Kubernetes here, and there doesn't need to be one just
+    // for this) so it still uses the same ECS task-definition/service/
+    // logging patterns as every other service in this file.
+    //
+    // "Warm on a schedule": the RAG cost-tier research this is built from
+    // assumed Kubernetes tooling (KEDA Cron Scaler, Karpenter) that has no
+    // equivalent in an ECS-only stack. The ECS-native translation used
+    // here: the ASG's own managed scaling keeps EC2 capacity matched to
+    // whatever the ECS service's desiredCount actually needs (the same
+    // "compute reacts to demand" idea Karpenter implements for EKS), and
+    // two EventBridge Scheduler rules are the only thing that ever touches
+    // desiredCount directly (1 during business hours, 0 outside) — see
+    // EmbeddingScheduleStart/Stop below. Nothing schedules the ASG's own
+    // capacity separately; that would risk the two drifting out of sync.
+    // A launch template, not the AutoScalingGroup's own inline instanceType/
+    // machineImage props — those trigger CDK's legacy Launch Configuration
+    // path underneath, which this account rejects outright ("The Launch
+    // Configuration creation operation is not available in your account" —
+    // a real CREATE_FAILED, not a guessed-around risk). Needs its own
+    // explicit security group since the launch-template path doesn't
+    // auto-create one the way the legacy path did.
+    const embeddingInstanceSecurityGroup = new ec2.SecurityGroup(this, "EmbeddingInstanceSecurityGroup", {
+      vpc,
+      description: "EDD Workbench embedding GPU instance - outbound only (pulls vLLM image and model weights)",
+      allowAllOutbound: true,
+    });
+    const embeddingInstanceRole = new iam.Role(this, "EmbeddingInstanceRole", {
+      assumedBy: new iam.ServicePrincipal("ec2.amazonaws.com"),
+      managedPolicies: [
+        iam.ManagedPolicy.fromAwsManagedPolicyName("service-role/AmazonEC2ContainerServiceforEC2Role"),
+      ],
+    });
+    const embeddingLaunchTemplate = new ec2.LaunchTemplate(this, "EmbeddingLaunchTemplate", {
+      instanceType: ec2.InstanceType.of(ec2.InstanceClass.G6, ec2.InstanceSize.XLARGE),
+      machineImage: ecs.EcsOptimizedImage.amazonLinux2(ecs.AmiHardwareType.GPU),
+      securityGroup: embeddingInstanceSecurityGroup,
+      // AsgCapacityProvider needs both of these to be explicit and
+      // pre-attached — it can't inject an instance profile/role or amend
+      // user data on an already-created launch template, unlike the legacy
+      // inline-props path. Role: standard ECS-agent EC2 instance role, so
+      // the agent can register the instance with the cluster.
+      role: embeddingInstanceRole,
+      // AsgCapacityProvider needs to append the ECS-agent bootstrap
+      // (ECS_CLUSTER=... in /etc/ecs/ecs.config) to this launch template's
+      // user data. It can only do that if we hand it an explicit UserData
+      // object up front — without this, CDK can't "expose" user data on an
+      // already-created launch template and synth fails.
+      userData: ec2.UserData.forLinux(),
+      // Default 30GB root volume is tight once you add the GPU AMI's own
+      // footprint, the vLLM Docker image, and Qwen3-Embedding-8B's
+      // downloaded weights (all re-downloaded on every scheduled start in
+      // this v1 — see the bootstrap comment above the task definition).
+      blockDevices: [{ deviceName: "/dev/xvda", volume: autoscaling.BlockDeviceVolume.ebs(100) }],
+    });
+    const embeddingAsg = new autoscaling.AutoScalingGroup(this, "EmbeddingAsg", {
+      vpc,
+      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      launchTemplate: embeddingLaunchTemplate,
+      minCapacity: 0,
+      maxCapacity: 1,
+    });
+    const embeddingCapacityProvider = new ecs.AsgCapacityProvider(this, "EmbeddingCapacityProvider", {
+      autoScalingGroup: embeddingAsg,
+      enableManagedScaling: true,
+      targetCapacityPercent: 100,
+      // Managed termination protection would stop the ASG from
+      // terminating this instance while a task is running on it — the
+      // opposite of what "actually stop paying for it overnight" needs.
+      enableManagedTerminationProtection: false,
+    });
+    cluster.addAsgCapacityProvider(embeddingCapacityProvider);
+
+    // Private-DNS Cloud Map namespace so the worker can reach this service
+    // by a stable internal name (EMBEDDING_SERVICE_INTERNAL_URL above)
+    // rather than an IP that changes every time the instance is replaced.
+    const internalNamespace = new servicediscovery.PrivateDnsNamespace(this, "InternalNamespace", {
+      name: "edd-workbench.internal",
+      vpc,
+    });
+
+    const embeddingSecurityGroup = new ec2.SecurityGroup(this, "EmbeddingServiceSecurityGroup", {
+      vpc,
+      description: "EDD Workbench embedding service (vLLM) - inbound from the worker only",
+      allowAllOutbound: true, // needs real internet egress: pulls the vLLM image from Docker Hub and the model weights from Hugging Face
+    });
+    embeddingSecurityGroup.addIngressRule(
+      workerService.connections.securityGroups[0],
+      ec2.Port.tcp(8000),
+      // EC2 security group rule descriptions reject apostrophes (and most
+      // other punctuation) — found the hard way via a real CREATE_FAILED,
+      // not guessed up front.
+      "Worker service to embedding service (vLLM OpenAI-compatible API)",
+    );
+
+    const embeddingTaskDefinition = new ecs.Ec2TaskDefinition(this, "EmbeddingTaskDefinition", {
+      networkMode: ecs.NetworkMode.AWS_VPC,
+    });
+    embeddingTaskDefinition.addContainer("embedding", {
+      // The official vLLM image, not a Dockerfile of our own — there's no
+      // application code here to bake in, only a public inference engine
+      // pointed at a public model id. Baking a custom AMI/image with the
+      // model weights pre-loaded (to cut the every-scheduled-start
+      // download cost) is a real, worthwhile follow-up once this is
+      // proven, not a v1 requirement.
+      image: ecs.ContainerImage.fromRegistry("vllm/vllm-openai:latest"),
+      gpuCount: 1,
+      // g6.xlarge has 16GB RAM — leave real headroom for the host OS/ECS
+      // agent rather than reserving all of it for the container.
+      memoryReservationMiB: 14000,
+      // Real deploy verification hit a genuine startup crash here: the
+      // model's native 40960-token context window needs 5.62 GiB of KV
+      // cache, but the L4's 22GB VRAM only has 3.3 GiB left after loading
+      // the 14.11 GiB of bf16 weights (RuntimeError: "Engine core
+      // initialization failed" / ValueError citing the exact shortfall).
+      // Our chunks (chunking.ts) top out around 1200 chars (~a few hundred
+      // tokens), nowhere near 40960, so capping max-model-len is a correct
+      // fit for this workload, not a workaround — leaves headroom for
+      // concurrent requests too.
+      // A second real startup finding: a live embedding call returned a
+      // real 400 from vLLM — "Model 'Qwen/Qwen3-Embedding-8B' does not
+      // support Matryoshka embeddings; dimensions must be unset" — because
+      // Qwen3-Embedding-8B's published config.json doesn't declare
+      // Matryoshka support even though the model itself was trained with
+      // MRL. --hf-overrides opts vLLM into honoring our embeddingClient.ts
+      // `dimensions: 1024` request param (confirmed against vLLM's own
+      // docs/issue tracker, not guessed).
+      command: [
+        "--model",
+        "Qwen/Qwen3-Embedding-8B",
+        "--dtype",
+        "auto",
+        "--max-model-len",
+        "4096",
+        "--hf-overrides",
+        '{"is_matryoshka": true, "matryoshka_dimensions": [1024]}',
+      ],
+      portMappings: [{ containerPort: 8000 }],
+      logging: ecs.LogDrivers.awsLogs({ streamPrefix: "edd-workbench-embedding" }),
+    });
+    const embeddingService = new ecs.Ec2Service(this, "EmbeddingService", {
+      cluster,
+      serviceName: "embedding",
+      taskDefinition: embeddingTaskDefinition,
+      // Starts at 0 — only ever changed by the EventBridge Scheduler rules
+      // below, never by a deploy. A real deploy (a new image/task revision)
+      // while this happens to be scheduled off simply updates the service
+      // definition without starting any tasks, exactly as intended.
+      desiredCount: 0,
+      capacityProviderStrategies: [{ capacityProvider: embeddingCapacityProvider.capacityProviderName, weight: 1 }],
+      securityGroups: [embeddingSecurityGroup],
+      cloudMapOptions: {
+        cloudMapNamespace: internalNamespace,
+        name: "embedding",
+        dnsRecordType: servicediscovery.DnsRecordType.A,
+      },
+      circuitBreaker: { rollback: true },
+      minHealthyPercent: 0, // single-instance service that spends most of its life at desiredCount 0 — 100% would block any deploy
+    });
+
+    // Two schedule-triggered flips of desiredCount — see this section's own
+    // top comment for why this (not a Kubernetes-specific scaler) is the
+    // ECS-native "warm on a schedule" mechanism. Universal targets invoke
+    // an AWS API action directly with no Lambda in between; the {{service}}
+    // segment of the ARN is the AWS SDK service identifier (lowercase
+    // "ecs"), but the request body fields are PascalCase (Cluster/Service/
+    // DesiredCount) — a real CREATE_FAILED ("missing field(s): Service")
+    // proved the lowercase camelCase guess wrong; confirmed PascalCase via
+    // real-world universal-target examples before fixing this.
+    const embeddingSchedulerRole = new iam.Role(this, "EmbeddingSchedulerRole", {
+      assumedBy: new iam.ServicePrincipal("scheduler.amazonaws.com"),
+    });
+    embeddingSchedulerRole.addToPolicy(
+      new iam.PolicyStatement({ actions: ["ecs:UpdateService"], resources: [embeddingService.serviceArn] }),
+    );
+
+    // Business hours only, UK time — ScheduleExpressionTimezone handles
+    // the BST/GMT clock change automatically, unlike a fixed UTC cron
+    // would. Narrow this window once real usage patterns are known (every
+    // hour trimmed is real, direct savings at this instance size).
+    new scheduler.CfnSchedule(this, "EmbeddingScheduleStart", {
+      scheduleExpression: "cron(0 7 ? * MON-FRI *)",
+      scheduleExpressionTimezone: "Europe/London",
+      flexibleTimeWindow: { mode: "OFF" },
+      target: {
+        arn: "arn:aws:scheduler:::aws-sdk:ecs:updateService",
+        roleArn: embeddingSchedulerRole.roleArn,
+        input: JSON.stringify({ Cluster: cluster.clusterName, Service: embeddingService.serviceName, DesiredCount: 1 }),
+      },
+    });
+    new scheduler.CfnSchedule(this, "EmbeddingScheduleStop", {
+      scheduleExpression: "cron(0 19 ? * MON-FRI *)",
+      scheduleExpressionTimezone: "Europe/London",
+      flexibleTimeWindow: { mode: "OFF" },
+      target: {
+        arn: "arn:aws:scheduler:::aws-sdk:ecs:updateService",
+        roleArn: embeddingSchedulerRole.roleArn,
+        input: JSON.stringify({ Cluster: cluster.clusterName, Service: embeddingService.serviceName, DesiredCount: 0 }),
+      },
     });
 
     // --- One-off migration task ------------------------------------------
@@ -448,6 +814,7 @@ function handler(event) {
     new cdk.CfnOutput(this, "DatabaseOwnerSecretArn", { value: database.secret!.secretArn });
     new cdk.CfnOutput(this, "DocumentsBucketName", { value: documentsBucket.bucketName });
     new cdk.CfnOutput(this, "Auth0ConfigSecretArn", { value: auth0Config.secretArn });
+    new cdk.CfnOutput(this, "Auth0ManagementConfigSecretArn", { value: auth0ManagementConfig.secretArn });
     // Consumed by scripts/run-migrations.mjs to actually invoke the
     // migration task after each deploy — ECS RunTask needs all four.
     new cdk.CfnOutput(this, "ClusterArn", { value: cluster.clusterArn });

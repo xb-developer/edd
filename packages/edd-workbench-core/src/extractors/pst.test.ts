@@ -63,6 +63,22 @@ describe("iteratePstMessages", () => {
     expect(records.every((r) => r.folderPath.startsWith("Top of Personal Folders"))).toBe(true);
   });
 
+  it("populates sizeBytes from the real PR_MESSAGE_SIZE property (a `long`, converted to a plain number) — not left at 0/unset", async () => {
+    const records = await collect(ENRON_PST);
+    const twCommercial = records.filter(
+      (r) => r.folderPath === "Top of Personal Folders/lokay-m/MLOKAY (Non-Privileged)/TW-Commercial Group",
+    );
+
+    // No independently-sourced expected byte count exists for this fixture
+    // (pst-extractor's own PSTMessage.spec.ts test file isn't published to
+    // npm, unlike the subject/sender values checked above) — asserting a
+    // real, plausible positive number is the honest ground truth available
+    // here, not a fabricated exact value.
+    expect(typeof twCommercial[0].sizeBytes).toBe("number");
+    expect(twCommercial[0].sizeBytes).toBeGreaterThan(0);
+    expect(Number.isNaN(twCommercial[0].sizeBytes)).toBe(false);
+  });
+
   it("normalizes pst-extractor's empty-string bodyHTML ('no HTML body') to null, matching every other extractor's absent-field contract", async () => {
     const records = await collect(ENRON_PST);
 

@@ -1,6 +1,11 @@
 services:
   postgres:
-    image: postgres:16
+    # pgvector/pgvector:pg16, not plain postgres:16 — a drop-in build with
+    # the pgvector extension already compiled in (needed for
+    # document_chunks' embedding column, see migration 026). Real RDS
+    # Postgres 16 supports `CREATE EXTENSION vector` out of the box; this
+    # is the equivalent for local dev/test.
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_DB: edd_workbench
       POSTGRES_USER: postgres

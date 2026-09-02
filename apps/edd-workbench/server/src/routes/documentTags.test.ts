@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import express from "express";
 import request from "supertest";
-import { Client } from "pg";
 import { afterAll, describe, expect, it } from "vitest";
 import { pool, withOrgSession, initMatterGuidCounter, nextMatterGuid } from "@xbundle/edd-workbench-core";
 import { documentTagsRouter } from "./documentTags.js";
@@ -30,31 +29,23 @@ function buildTestApp(eddContext: EddRequestContext) {
 }
 
 async function deleteTestOrg(orgId: string): Promise<void> {
-  const client = new Client({ connectionString: "postgres://postgres:postgres@localhost:5432/edd_workbench_test" });
-  await client.connect();
-  await client.query("DELETE FROM organizations WHERE id = $1", [orgId]);
-  await client.end();
+  await withOrgSession(orgId, async (client) => {
+    await client.query("DELETE FROM audit_log WHERE org_id = $1", [orgId]);
+    await client.query("DELETE FROM matters WHERE org_id = $1", [orgId]);
+  });
 }
 
 async function createTestOrgAndMatter(namePrefix: string) {
-  const orgId = randomUUID();
-  await pool.query("INSERT INTO organizations (id, name, auth0_org_id) VALUES ($1, $2, $3)", [
-    orgId,
-    `${namePrefix} test org`,
-    `test-org-${orgId}`,
-  ]);
+  const orgId = `org_test_${randomUUID()}`;
+  const userId = `auth0|${randomUUID()}`;
 
   return withOrgSession(orgId, async (client) => {
-    const userRow = await client.query<{ id: string }>(
-      "INSERT INTO users (auth0_user_id, email) VALUES ($1, $2) RETURNING id",
-      [`auth0|${randomUUID()}`, "tester@example.com"],
-    );
     const matterRow = await client.query<{ id: string }>("INSERT INTO matters (org_id, name) VALUES ($1, $2) RETURNING id", [
       orgId,
       `${namePrefix} test matter`,
     ]);
     await initMatterGuidCounter(client, matterRow.rows[0].id);
-    return { orgId, matterId: matterRow.rows[0].id, userId: userRow.rows[0].id };
+    return { orgId, matterId: matterRow.rows[0].id, userId };
   });
 }
 

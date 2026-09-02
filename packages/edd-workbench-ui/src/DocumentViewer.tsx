@@ -4,6 +4,7 @@ import type { ApiClient } from "./api";
 import type { DocumentDTO } from "./types";
 import { viewerKindFor } from "./viewers/viewerKind";
 import { PptxSlideViewer } from "./viewers/PptxSlideViewer";
+import { formatDate } from "./format";
 
 export interface DocumentViewerProps {
   api: ApiClient;
@@ -57,7 +58,7 @@ export function DocumentViewer({ api, matterId, document }: DocumentViewerProps)
             </div>
           ) : null}
           <div>
-            <span className="email-label">Date</span> {document.docDate ?? "(unknown)"}
+            <span className="email-label">Date</span> {document.docDate ? formatDate(document.docDate) : "(unknown)"}
           </div>
           <div>
             <span className="email-label">Subject</span> {document.subject ?? "(no subject)"}

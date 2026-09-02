@@ -8,12 +8,9 @@ This file exists to move active work on EDD Workbench to a new machine with full
 
 A separate **Electron desktop proof-of-concept** lives in this same repo at `proof-of-concept/` (`client`/`electron`/`server` workspaces — `cloud-backend`/`web` inside that folder are an unrelated, abandoned rebuild attempt; ignore those two). It's the design reference this whole rebuild has been matched against feature-by-feature — when in doubt about how something should look or behave, check the POC's real source before guessing.
 
-## ⚠️ Not a git repository
+## Git status
 
-`git status` in the repo root fails with "not a git repository." **All work so far exists only as files on disk, with no version history, no remote, no way to diff or roll back.** Before moving machines:
-
-1. Strongly consider running `git init` and committing the current state *before* copying anything, so the new machine at least starts with a real history point.
-2. However you transfer the files (rsync, tar, cloud sync), verify the transfer completed correctly (file counts/sizes) before treating the old machine's copy as disposable — there is currently no safety net if a copy is partial or corrupted.
+This is now a real git repository, with history and a remote — the earlier "not a git repository" gap has been closed. `origin` points to `https://github.com/xb-developer/edd.git`, and `main` is up to date with it. History currently starts from a single squashed `Initial commit: EDD Workbench eDiscovery SPA` — everything before that point has no finer-grained history, so don't expect `git blame`/`git log` on individual features prior to that commit. Normal git workflow applies from here: commit, branch, and push as usual, and treat `origin/main` as the real safety net when moving machines rather than a manual file copy.
 
 ## Repo layout
 

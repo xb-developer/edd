@@ -1,4 +1,20 @@
-/** documentId -> ingestStatus, from the latest getMatterDocuments refetch. An id absent from this lookup (not yet visible in a response, or deleted mid-poll) is treated as "unknown", not terminal. */
+/**
+ * documentId -> ingestStatus, from the latest getMatterDocuments refetch.
+ * An id absent from this lookup means its row was DELETED — a real,
+ * expected outcome, not "hasn't loaded yet": a fully, successfully
+ * expanded transparent container (PST/OST/zip/7z/mbox — see ingest.ts's
+ * handlePstIngest et al.) deletes its own document row once every one of
+ * its members/messages has been extracted, precisely because there's
+ * nothing left to review beyond what's now its own independent children.
+ * Every id this watcher ever tracks was already confirmed to exist (added
+ * only after its own upload-complete call succeeded), so "absent" can only
+ * mean that clean-deletion outcome, never "not yet visible" — treating it
+ * as still-pending (the original design here) meant a fully successful
+ * container upload could never be observed leaving pending at all, since
+ * there's no "ready" row left to report one: the progress bar would sit
+ * frozen until the poll simply gave up. Confirmed as a real bug on a real
+ * PST upload, not a hypothetical.
+ */
 export interface IngestWatchStatusLookup {
   [documentId: string]: "pending" | "processing" | "ready" | "failed" | undefined;
 }
@@ -31,8 +47,11 @@ export function stepIngestWatch(
 
   for (const id of watchedIds) {
     const status = statusByDocumentId[id];
-    if (status === "ready") readyCount++;
-    else if (status === "failed") failedCount++;
+    if (status === "failed") failedCount++;
+    // status === undefined: the row is gone — a fully successful
+    // transparent-container expansion (see this file's own top comment),
+    // counted as ready alongside a real "ready" row.
+    else if (status === "ready" || status === undefined) readyCount++;
     else stillPending.push(id);
   }
 

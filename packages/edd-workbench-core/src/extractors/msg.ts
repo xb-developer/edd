@@ -117,9 +117,14 @@ export async function extractMsgMetadata(buffer: Buffer): Promise<MsgMetadata> {
         const attachment = reader.getAttachment(attachmentField);
         attachments.push({ filename: attachment.fileName ?? "unnamed", content: Buffer.from(attachment.content) });
       } catch {
-        // One unreadable attachment (e.g. a genuinely embedded-msg-as-CFBF-
-        // storage case getAttachment doesn't support) must never lose the
-        // rest of the message's metadata or its other attachments.
+        // One unreadable attachment must never lose the rest of the
+        // message's metadata or its other attachments. Note: an embedded
+        // .msg-within-.msg attachment (`innerMsgContent: true`) is NOT such
+        // a case — getAttachment really does reconstruct it into a genuine
+        // CFBF byte buffer (confirmed against a real fixture with one),
+        // which ingest.ts's expandAttachments then recurses into like any
+        // other real attachment. This catch is for genuinely corrupt/
+        // unreadable attachment data, not a known unsupported format.
       }
     }
 

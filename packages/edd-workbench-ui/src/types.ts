@@ -3,7 +3,29 @@ export interface MatterDTO {
   name: string;
   referenceCode: string | null;
   status: string;
+  /** Used client-side to decide whether the current user may manage this matter's access list (admin-or-creator gate — see matterMembers.ts). */
+  createdBy: string | null;
   createdAt: string;
+}
+
+/** A user who already has access to a matter — see matterMembers.ts's GET /. */
+export interface MatterMemberDTO {
+  userId: string;
+  email: string;
+  name: string | null;
+}
+
+/**
+ * An org member (per Auth0 — the sole source of truth for org membership,
+ * not a local table) who does NOT already have access to this matter.
+ * Deliberately no `userId` — a candidate who's never logged into this app
+ * yet has no local user row; addMatterMember (api.ts) sends the Auth0
+ * identity instead, and the server creates one if needed.
+ */
+export interface MatterMemberCandidateDTO {
+  auth0UserId: string;
+  email: string;
+  name: string | null;
 }
 
 export interface DocumentDTO {
@@ -72,4 +94,21 @@ export interface ExportJobDTO {
   kind: "documents" | "properties";
   status: "pending" | "processing" | "ready" | "failed";
   error: string | null;
+}
+
+/** One queue's liveness — see workerStatus.ts. Null fields mean "no data yet" (e.g. the worker hasn't ticked since deploy), not an error. */
+export interface WorkerQueueStatusDTO {
+  name: string;
+  heartbeat: {
+    queueName: string;
+    lastTickAt: string | null;
+    processingStartedAt: string | null;
+    processedTotal: number;
+    failedTotal: number;
+  } | null;
+  approximateMessages: number | null;
+}
+
+export interface WorkerStatusDTO {
+  queues: WorkerQueueStatusDTO[];
 }

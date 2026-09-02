@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import express from "express";
 import request from "supertest";
-import { Client, type PoolClient } from "pg";
+import type { PoolClient } from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { pool, withOrgSession, initMatterGuidCounter, s3Client, DOCUMENTS_BUCKET, sqsClient } from "@xbundle/edd-workbench-core";
 import { CreateBucketCommand, HeadBucketCommand, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
@@ -31,15 +31,11 @@ function buildTestApp(eddContext: EddRequestContext) {
   return app;
 }
 
-// A fresh Client per call, not a shared singleton — this file has more than
-// one describe block, and a pg Client can't reconnect after .end(), so a
-// module-level singleton closed in one block's afterAll would break the
-// next block's cleanup.
 async function deleteTestOrg(orgId: string): Promise<void> {
-  const client = new Client({ connectionString: "postgres://postgres:postgres@localhost:5432/edd_workbench_test" });
-  await client.connect();
-  await client.query("DELETE FROM organizations WHERE id = $1", [orgId]);
-  await client.end();
+  await withOrgSession(orgId, async (client) => {
+    await client.query("DELETE FROM audit_log WHERE org_id = $1", [orgId]);
+    await client.query("DELETE FROM matters WHERE org_id = $1", [orgId]);
+  });
 }
 
 /**
@@ -104,24 +100,16 @@ async function insertTestDocument(
 }
 
 async function createTestOrgAndMatter(namePrefix: string) {
-  const orgId = randomUUID();
-  await pool.query("INSERT INTO organizations (id, name, auth0_org_id) VALUES ($1, $2, $3)", [
-    orgId,
-    `${namePrefix} test org`,
-    `test-org-${orgId}`,
-  ]);
+  const orgId = `org_test_${randomUUID()}`;
+  const userId = `auth0|${randomUUID()}`;
 
   return withOrgSession(orgId, async (client) => {
-    const userRow = await client.query<{ id: string }>(
-      "INSERT INTO users (auth0_user_id, email) VALUES ($1, $2) RETURNING id",
-      [`auth0|${randomUUID()}`, "tester@example.com"],
-    );
     const matterRow = await client.query<{ id: string }>("INSERT INTO matters (org_id, name) VALUES ($1, $2) RETURNING id", [
       orgId,
       `${namePrefix} test matter`,
     ]);
     await initMatterGuidCounter(client, matterRow.rows[0].id);
-    return { orgId, matterId: matterRow.rows[0].id, userId: userRow.rows[0].id };
+    return { orgId, matterId: matterRow.rows[0].id, userId };
   });
 }
 
@@ -299,6 +287,11 @@ describe("documents router — upload-complete", () => {
     );
     expect(Messages).toHaveLength(1);
     expect(JSON.parse(Messages![0].Body!)).toEqual({ documentId, orgId });
+
+    const audit = await withOrgSession(orgId, (client) =>
+      client.query("SELECT action, description, document_id FROM audit_log WHERE document_id = $1", [documentId]),
+    );
+    expect(audit.rows).toEqual([{ action: "document.upload", description: 'Uploaded file "test.eml"', document_id: documentId }]);
   });
 
   it("404s for a document that doesn't exist", async () => {
@@ -484,6 +477,159 @@ describe("documents router — list", () => {
     expect(leafDto.familyGuid).toBe(rootDto.guid);
     expect(leafDto.parentGuid).toBe(middleDto.guid);
     expect(leafDto.depth).toBe(2);
+  });
+
+  // Reproduces the real production bug this query fixes: a nested email's
+  // own attachment is only inserted once that nested email is pulled off
+  // its own SQS message and reprocessed — by which point its unrelated
+  // siblings (inserted synchronously, right after the nested email itself)
+  // already exist. So the attachment's raw guid_number (5) ends up HIGHER
+  // than its later-inserted-but-unrelated siblings (3, 4), even though it
+  // belongs directly under guid 2, not after guid 4. The list route must
+  // both (a) sort it immediately after its real parent, and (b) renumber
+  // every returned guid to match that corrected order, with no gaps.
+  it("renumbers GUIDs to match tree order, sorting a grandchild immediately after its real parent even though it was inserted (and thus guid-numbered) after later, unrelated siblings", async () => {
+    const { orgId, matterId, userId } = await createTestOrgAndMatter("list-tree-renumber");
+    orgIdsToClean.push(orgId);
+
+    const { nestedEmailId } = await withOrgSession(orgId, async (client) => {
+      const rootId = await insertTestDocument(client, {
+        orgId,
+        matterId,
+        guidNumber: 1,
+        filename: "Processing check.eml",
+        extension: "eml",
+        sizeBytes: 100,
+        s3Key: "k1",
+        contentType: "eml",
+        ingestStatus: "ready",
+      });
+      const nestedEmailId = await insertTestDocument(client, {
+        orgId,
+        matterId,
+        guidNumber: 2,
+        filename: "unnamed.eml",
+        extension: "eml",
+        sizeBytes: 100,
+        s3Key: "k2",
+        contentType: "eml",
+        ingestStatus: "ready",
+        parentDocumentId: rootId,
+      });
+      await insertTestDocument(client, {
+        orgId,
+        matterId,
+        guidNumber: 3,
+        filename: "Blue sky.pdf",
+        extension: "pdf",
+        sizeBytes: 50,
+        s3Key: "k3",
+        contentType: "pdf",
+        ingestStatus: "ready",
+        parentDocumentId: rootId,
+      });
+      await insertTestDocument(client, {
+        orgId,
+        matterId,
+        guidNumber: 4,
+        filename: "PRACTICE DIRECTION.pdf",
+        extension: "pdf",
+        sizeBytes: 50,
+        s3Key: "k4",
+        contentType: "pdf",
+        ingestStatus: "ready",
+        parentDocumentId: rootId,
+      });
+      // The nested email's own attachment — inserted last, given the
+      // highest raw guid_number, but belongs one level under guid 2.
+      await client.query(
+        `INSERT INTO documents (id, org_id, matter_id, parent_document_id, family_document_id, depth, guid_number, original_filename, extension, size_bytes, s3_key, content_type_detected, ingest_status)
+         VALUES ($1, $2, $3, $4, $5, 2, 5, 'WhatsApp Image.jpeg', 'jpeg', 20, 'k5', 'image', 'ready')`,
+        [randomUUID(), orgId, matterId, nestedEmailId, rootId],
+      );
+      return { rootId, nestedEmailId };
+    });
+
+    const app = buildTestApp({ orgId, userId, role: "admin", email: "tester@example.com" });
+    const response = await request(app).get(`/api/matters/${matterId}/documents`).send();
+
+    expect(response.status).toBe(200);
+    const order = response.body.map((d: { originalFilename: string; guid: string }) => [d.originalFilename, d.guid]);
+    expect(order).toEqual([
+      ["Processing check.eml", "000001"],
+      ["unnamed.eml", "000002"],
+      ["WhatsApp Image.jpeg", "000003"],
+      ["Blue sky.pdf", "000004"],
+      ["PRACTICE DIRECTION.pdf", "000005"],
+    ]);
+
+    // familyGuid/parentGuid must reflect the SAME renumbered values, not the
+    // raw guid_number — the whole point is a number cited from the UI
+    // matches what every other computed field also says.
+    const nested = response.body.find((d: { documentId: string }) => d.documentId === nestedEmailId);
+    const image = response.body.find((d: { originalFilename: string }) => d.originalFilename === "WhatsApp Image.jpeg");
+    expect(nested.guid).toBe("000002");
+    expect(image.parentGuid).toBe("000002");
+    expect(image.familyGuid).toBe("000001");
+  });
+
+  it("gives a single document (GET /:id) the same renumbered guid the list route would show it", async () => {
+    const { orgId, matterId, userId } = await createTestOrgAndMatter("list-tree-renumber-single");
+    orgIdsToClean.push(orgId);
+
+    const { laterSiblingId } = await withOrgSession(orgId, async (client) => {
+      const rootId = await insertTestDocument(client, {
+        orgId,
+        matterId,
+        guidNumber: 1,
+        filename: "root.eml",
+        extension: "eml",
+        sizeBytes: 100,
+        s3Key: "k1",
+        contentType: "eml",
+        ingestStatus: "ready",
+      });
+      const nestedEmailId = await insertTestDocument(client, {
+        orgId,
+        matterId,
+        guidNumber: 2,
+        filename: "nested.eml",
+        extension: "eml",
+        sizeBytes: 100,
+        s3Key: "k2",
+        contentType: "eml",
+        ingestStatus: "ready",
+        parentDocumentId: rootId,
+      });
+      const laterSiblingId = await insertTestDocument(client, {
+        orgId,
+        matterId,
+        guidNumber: 3,
+        filename: "sibling.pdf",
+        extension: "pdf",
+        sizeBytes: 50,
+        s3Key: "k3",
+        contentType: "pdf",
+        ingestStatus: "ready",
+        parentDocumentId: rootId,
+      });
+      await client.query(
+        `INSERT INTO documents (id, org_id, matter_id, parent_document_id, family_document_id, depth, guid_number, original_filename, extension, size_bytes, s3_key, content_type_detected, ingest_status)
+         VALUES ($1, $2, $3, $4, $5, 2, 4, 'nested-attachment.pdf', 'pdf', 20, 'k4', 'pdf', 'ready')`,
+        [randomUUID(), orgId, matterId, nestedEmailId, rootId],
+      );
+      return { rootId, laterSiblingId };
+    });
+
+    const app = buildTestApp({ orgId, userId, role: "admin", email: "tester@example.com" });
+    // laterSiblingId's raw guid_number is 3, but its final tree position is
+    // AFTER nested.eml's own attachment (raw guid_number 4) — so among the
+    // 4 total documents (root, nested.eml, nested-attachment.pdf, sibling),
+    // its renumbered display guid must be 4, not 3.
+    const response = await request(app).get(`/api/matters/${matterId}/documents/${laterSiblingId}`).send();
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ documentId: laterSiblingId, guid: "000004", parentGuid: "000001" });
   });
 
   it("never returns another organization's documents, even for a real matterId", async () => {
@@ -737,6 +883,13 @@ describe("documents router — delete", () => {
     expect(getResponse.status).toBe(404);
 
     await expect(s3Client.send(new GetObjectCommand({ Bucket: DOCUMENTS_BUCKET, Key: s3Key }))).rejects.toBeTruthy();
+
+    // document_id is deliberately NOT set on a delete audit row (the
+    // document no longer exists by the time it's written, and document_id
+    // is a real FK) — matterId + the rendered description carry the record
+    // instead.
+    const audit = await withOrgSession(orgId, (client) => client.query("SELECT action, description FROM audit_log WHERE matter_id = $1", [matterId]));
+    expect(audit.rows).toEqual([{ action: "document.delete", description: 'Deleted file "bundle.pdf"' }]);
   });
 
   it("cascade-deletes a document's own expanded attachments (children), including their S3 objects", async () => {
@@ -782,6 +935,13 @@ describe("documents router — delete", () => {
     const childRow = await withOrgSession(orgId, (client) => client.query("SELECT id FROM documents WHERE id = $1", [childId]));
     expect(childRow.rowCount).toBe(0);
     await expect(s3Client.send(new GetObjectCommand({ Bucket: DOCUMENTS_BUCKET, Key: childKey }))).rejects.toBeTruthy();
+
+    // One audit row per document actually removed — the cascade-deleted
+    // child too, not just the id the caller explicitly requested.
+    const audit = await withOrgSession(orgId, (client) =>
+      client.query("SELECT description FROM audit_log WHERE matter_id = $1 AND action = 'document.delete' ORDER BY description", [matterId]),
+    );
+    expect(audit.rows.map((r) => r.description)).toEqual(['Deleted file "attachment.pdf"', 'Deleted file "covering-email.eml"']);
   });
 
   it("404s for a document that doesn't exist", async () => {
@@ -819,5 +979,255 @@ describe("documents router — delete", () => {
 
     const stillThere = await withOrgSession(orgB, (client) => client.query("SELECT id FROM documents WHERE id = $1", [documentIdB]));
     expect(stillThere.rowCount).toBe(1);
+  });
+
+  it("bulk-deletes multiple documents and their real S3 objects in one call", async () => {
+    const { orgId, matterId, userId } = await createTestOrgAndMatter("bulk-delete");
+    orgIdsToClean.push(orgId);
+
+    const keyA = `tenants/test/documents/${randomUUID()}/original.pdf`;
+    const keyB = `tenants/test/documents/${randomUUID()}/original.pdf`;
+    await s3Client.send(new PutObjectCommand({ Bucket: DOCUMENTS_BUCKET, Key: keyA, Body: Buffer.from("a") }));
+    await s3Client.send(new PutObjectCommand({ Bucket: DOCUMENTS_BUCKET, Key: keyB, Body: Buffer.from("b") }));
+
+    const { idA, idB } = await withOrgSession(orgId, async (client) => {
+      const idA = await insertTestDocument(client, {
+        orgId,
+        matterId,
+        guidNumber: 1,
+        filename: "a.pdf",
+        extension: "pdf",
+        sizeBytes: 1,
+        s3Key: keyA,
+        contentType: "pdf",
+        ingestStatus: "ready",
+      });
+      const idB = await insertTestDocument(client, {
+        orgId,
+        matterId,
+        guidNumber: 2,
+        filename: "b.pdf",
+        extension: "pdf",
+        sizeBytes: 1,
+        s3Key: keyB,
+        contentType: "pdf",
+        ingestStatus: "ready",
+      });
+      return { idA, idB };
+    });
+
+    const app = buildTestApp({ orgId, userId, role: "admin", email: "tester@example.com" });
+    const response = await request(app)
+      .delete(`/api/matters/${matterId}/documents`)
+      .send({ documentIds: [idA, idB] });
+    expect(response.status).toBe(200);
+    expect(response.body.deletedCount).toBe(2);
+
+    const remaining = await withOrgSession(orgId, (client) => client.query("SELECT id FROM documents WHERE id = ANY($1::uuid[])", [[idA, idB]]));
+    expect(remaining.rowCount).toBe(0);
+    await expect(s3Client.send(new GetObjectCommand({ Bucket: DOCUMENTS_BUCKET, Key: keyA }))).rejects.toBeTruthy();
+    await expect(s3Client.send(new GetObjectCommand({ Bucket: DOCUMENTS_BUCKET, Key: keyB }))).rejects.toBeTruthy();
+  });
+
+  it("bulk delete rejects the WHOLE request — deleting nothing — when one documentId doesn't belong to this matter", async () => {
+    const { orgId, matterId, userId } = await createTestOrgAndMatter("bulk-delete-cross-matter-a");
+    orgIdsToClean.push(orgId);
+    // A second matter in the SAME org — proves the safety check is scoped
+    // by matter, not just by org (a real gap a same-org, different-matter
+    // smuggled id would slip through if only org-level RLS were relied on).
+    const otherMatterId = await withOrgSession(orgId, async (client) => {
+      const row = await client.query<{ id: string }>("INSERT INTO matters (org_id, name) VALUES ($1, $2) RETURNING id", [
+        orgId,
+        "other matter",
+      ]);
+      await initMatterGuidCounter(client, row.rows[0].id);
+      return row.rows[0].id;
+    });
+
+    const { ownId, foreignId } = await withOrgSession(orgId, async (client) => {
+      const ownId = await insertTestDocument(client, {
+        orgId,
+        matterId,
+        guidNumber: 1,
+        filename: "own.pdf",
+        extension: "pdf",
+        sizeBytes: 1,
+        s3Key: null,
+        contentType: "pdf",
+        ingestStatus: "ready",
+      });
+      const foreignId = await insertTestDocument(client, {
+        orgId,
+        matterId: otherMatterId,
+        guidNumber: 1,
+        filename: "foreign.pdf",
+        extension: "pdf",
+        sizeBytes: 1,
+        s3Key: null,
+        contentType: "pdf",
+        ingestStatus: "ready",
+      });
+      return { ownId, foreignId };
+    });
+
+    const app = buildTestApp({ orgId, userId, role: "admin", email: "tester@example.com" });
+    const response = await request(app)
+      .delete(`/api/matters/${matterId}/documents`)
+      .send({ documentIds: [ownId, foreignId] });
+    expect(response.status).toBe(400);
+
+    // Nothing deleted — not even the one legitimately-owned id — matching
+    // exportsRouter's own "reject the whole request" precedent for exactly
+    // this shape of bulk documentIds body.
+    const stillThere = await withOrgSession(orgId, (client) =>
+      client.query("SELECT id FROM documents WHERE id = ANY($1::uuid[])", [[ownId, foreignId]]),
+    );
+    expect(stillThere.rowCount).toBe(2);
+  });
+
+  it("400s for a bulk delete with an empty/missing documentIds array", async () => {
+    const { orgId, matterId, userId } = await createTestOrgAndMatter("bulk-delete-empty");
+    orgIdsToClean.push(orgId);
+
+    const app = buildTestApp({ orgId, userId, role: "admin", email: "tester@example.com" });
+    const response = await request(app).delete(`/api/matters/${matterId}/documents`).send({ documentIds: [] });
+    expect(response.status).toBe(400);
+  });
+});
+
+describe("documents router — retry-ingest", () => {
+  let orgIdsToClean: string[] = [];
+  const ingestQueueUrl = process.env.EDD_WORKBENCH_INGEST_QUEUE_URL!;
+
+  beforeAll(async () => {
+    await sqsClient.send(new CreateQueueCommand({ QueueName: "edd-workbench-ingest-test" }));
+  });
+
+  afterEach(async () => {
+    for (const id of orgIdsToClean) await deleteTestOrg(id);
+    orgIdsToClean = [];
+    await sqsClient.send(new PurgeQueueCommand({ QueueUrl: ingestQueueUrl })).catch(() => {
+      // PurgeQueue can only run once per 60s per queue — fine to ignore in a
+      // fast local test loop.
+    });
+  });
+
+  it("resets a failed document to pending, clears its error, re-enqueues it, and records an audit event", async () => {
+    const { orgId, matterId, userId } = await createTestOrgAndMatter("retry-ingest");
+    orgIdsToClean.push(orgId);
+
+    const documentId = await withOrgSession(orgId, async (client) => {
+      const id = await insertTestDocument(client, {
+        orgId,
+        matterId,
+        guidNumber: 1,
+        filename: "corrupt.eml",
+        extension: "eml",
+        sizeBytes: 100,
+        s3Key: "tenants/test/documents/x/original.eml",
+        contentType: "eml",
+        ingestStatus: "failed",
+      });
+      await client.query("UPDATE documents SET ingest_error = $1 WHERE id = $2", ["Malformed MIME structure", id]);
+      return id;
+    });
+
+    const app = buildTestApp({ orgId, userId, role: "admin", email: "tester@example.com" });
+    const response = await request(app)
+      .post(`/api/matters/${matterId}/documents/retry-ingest`)
+      .send({ documentIds: [documentId] });
+
+    expect(response.status).toBe(202);
+    expect(response.body).toEqual({ retriedCount: 1 });
+
+    const row = await withOrgSession(orgId, (client) =>
+      client.query("SELECT ingest_status, ingest_error FROM documents WHERE id = $1", [documentId]),
+    );
+    expect(row.rows[0]).toEqual({ ingest_status: "pending", ingest_error: null });
+
+    const { Messages } = await sqsClient.send(
+      new ReceiveMessageCommand({ QueueUrl: ingestQueueUrl, WaitTimeSeconds: 2, MaxNumberOfMessages: 1 }),
+    );
+    expect(Messages).toHaveLength(1);
+    expect(JSON.parse(Messages![0].Body!)).toEqual({ documentId, orgId });
+
+    const audit = await withOrgSession(orgId, (client) =>
+      client.query("SELECT action, description FROM audit_log WHERE document_id = $1", [documentId]),
+    );
+    expect(audit.rows).toEqual([{ action: "document.retry_ingest", description: "Retried failed ingest" }]);
+  });
+
+  it("400s and enqueues nothing when one of the selected documents is not currently failed", async () => {
+    const { orgId, matterId, userId } = await createTestOrgAndMatter("retry-ingest-not-failed");
+    orgIdsToClean.push(orgId);
+
+    const failedId = await withOrgSession(orgId, (client) =>
+      insertTestDocument(client, {
+        orgId,
+        matterId,
+        guidNumber: 1,
+        filename: "a.eml",
+        extension: "eml",
+        sizeBytes: 100,
+        s3Key: "tenants/test/documents/a/original.eml",
+        contentType: "eml",
+        ingestStatus: "failed",
+      }),
+    );
+    const readyId = await withOrgSession(orgId, (client) =>
+      insertTestDocument(client, {
+        orgId,
+        matterId,
+        guidNumber: 2,
+        filename: "b.eml",
+        extension: "eml",
+        sizeBytes: 100,
+        s3Key: "tenants/test/documents/b/original.eml",
+        contentType: "eml",
+        ingestStatus: "ready",
+      }),
+    );
+
+    const app = buildTestApp({ orgId, userId, role: "admin", email: "tester@example.com" });
+    const response = await request(app)
+      .post(`/api/matters/${matterId}/documents/retry-ingest`)
+      .send({ documentIds: [failedId, readyId] });
+
+    expect(response.status).toBe(400);
+
+    // Neither document was touched, and nothing was enqueued — the whole
+    // request is rejected, matching bulk-delete's own precedent.
+    const rows = await withOrgSession(orgId, (client) =>
+      client.query("SELECT id, ingest_status FROM documents WHERE id = ANY($1::uuid[]) ORDER BY guid_number", [[failedId, readyId]]),
+    );
+    expect(rows.rows.map((r) => r.ingest_status)).toEqual(["failed", "ready"]);
+
+    const { Messages } = await sqsClient.send(
+      new ReceiveMessageCommand({ QueueUrl: ingestQueueUrl, WaitTimeSeconds: 1, MaxNumberOfMessages: 1 }),
+    );
+    expect(Messages ?? []).toHaveLength(0);
+  });
+
+  it("400s for a documentId that doesn't belong to this matter", async () => {
+    const { orgId, matterId, userId } = await createTestOrgAndMatter("retry-ingest-foreign");
+    orgIdsToClean.push(orgId);
+    const { orgId: otherOrgId } = await createTestOrgAndMatter("retry-ingest-foreign-other");
+    orgIdsToClean.push(otherOrgId);
+
+    const app = buildTestApp({ orgId, userId, role: "admin", email: "tester@example.com" });
+    const response = await request(app)
+      .post(`/api/matters/${matterId}/documents/retry-ingest`)
+      .send({ documentIds: [randomUUID()] });
+
+    expect(response.status).toBe(400);
+  });
+
+  it("400s for an empty/missing documentIds array", async () => {
+    const { orgId, matterId, userId } = await createTestOrgAndMatter("retry-ingest-empty");
+    orgIdsToClean.push(orgId);
+
+    const app = buildTestApp({ orgId, userId, role: "admin", email: "tester@example.com" });
+    const response = await request(app).post(`/api/matters/${matterId}/documents/retry-ingest`).send({ documentIds: [] });
+    expect(response.status).toBe(400);
   });
 });

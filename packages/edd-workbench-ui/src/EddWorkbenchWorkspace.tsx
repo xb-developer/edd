@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createApiClient } from "./api";
 import type { MatterDTO } from "./types";
 import { MatterDetail } from "./MatterDetail";
+import { closeViewerWindowForMatter } from "./viewer-window/useViewerWindow";
+import { WorkerHealthBar } from "./WorkerHealthBar";
 
 export interface EddWorkbenchWorkspaceProps {
   /** Defaults to the standalone app's own local server. A future host embedding this component elsewhere can point it at a different origin. */
@@ -14,43 +16,98 @@ export interface EddWorkbenchWorkspaceProps {
   onLogout?: () => void;
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  active: "#1F2A44",
-  closed: "#5B6272",
-  archived: "#5B6272",
-};
+// Persists across refreshes so re-opening the app returns to the same
+// matter rather than always defaulting to the most recent one.
+const SELECTED_MATTER_STORAGE_KEY = "edd-workbench:selectedMatterId";
 
-// Milestone 2 adds: clicking a matter shows its documents (MatterDetail),
-// clicking a document shows it rendered inline (DocumentViewer). Tagging/
-// filtering/export are still later milestones on top of this shell.
-//
-// Matches the POC's own split: the matter picker is a separate full-screen
-// state with no topbar at all (mirroring MatterPicker.tsx); the persistent
-// `.app` grid + `header.topbar` only appears once a matter is selected
-// (mirroring Register.tsx) — this component owns that single topbar rather
-// than MatterDetail duplicating one of its own.
+// There's no separate "pick a matter" screen anymore — the app always shows
+// the single topbar + tree-panel layout. Matter switching lives in a
+// top-left <select>; a brand-new org with zero matters skips straight to a
+// freshly created one instead of showing an empty state.
 export function EddWorkbenchWorkspace({ apiBaseUrl = "http://localhost:4430/api", getAccessToken, onLogout }: EddWorkbenchWorkspaceProps) {
   const [api] = useState(() => createApiClient(apiBaseUrl, getAccessToken));
   const [matters, setMatters] = useState<MatterDTO[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [newMatterName, setNewMatterName] = useState("");
-  const [creating, setCreating] = useState(false);
   const [selectedMatterId, setSelectedMatterId] = useState<string | null>(null);
+  // The caller's own local identity — needed to decide whether the current
+  // user may manage a matter's access list (admin, or that matter's own
+  // creator). Fetched once; doesn't change per matter.
+  const [me, setMe] = useState<{ userId: string; role: string } | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState("");
+  // Guards against a commit firing twice (e.g. Enter's own blur plus a
+  // real blur landing close together) and against Escape's cancellation
+  // being immediately followed by a stray blur-on-unmount commit.
+  const committingRef = useRef(false);
+  const cancelledRef = useRef(false);
+  const bootstrapped = useRef(false);
 
-  function refresh() {
-    api.getMatters().then(setMatters).catch((err) => setError(err.message));
+  function selectMatter(matterId: string) {
+    setSelectedMatterId(matterId);
+    localStorage.setItem(SELECTED_MATTER_STORAGE_KEY, matterId);
+    // Fire-and-forget — every time a matter becomes the active one (initial
+    // auto-select AND every dropdown switch), not just once per session.
+    api.recordMatterLoad(matterId).catch(() => {});
   }
 
-  useEffect(refresh, []);
+  function startEditingName(currentName: string) {
+    setNameInput(currentName);
+    setEditingName(true);
+  }
+
+  useEffect(() => {
+    // StrictMode double-invokes effects in dev; without this guard a
+    // brand-new org could end up with two "New matter" rows created.
+    if (bootstrapped.current) return;
+    bootstrapped.current = true;
+
+    // getMe and getMatters are fetched together, not independently — the
+    // empty-matters branch below needs to know the caller's role BEFORE
+    // deciding whether to auto-create is even a valid path (only
+    // admin/litigation_support can create a matter; a reviewer with zero
+    // *accessible* matters — a real possibility now that GET /matters is
+    // filtered by matter_members for non-admins — would otherwise attempt
+    // createMatter and get a 403 there's no visible recovery from).
+    Promise.all([api.getMe(), api.getMatters()])
+      .then(async ([meResult, fetched]) => {
+        setMe(meResult);
+        const canCreate = meResult.role === "admin" || meResult.role === "litigation_support";
+
+        if (fetched.length === 0) {
+          if (!canCreate) {
+            // Not "no matters exist anywhere" necessarily — just none this
+            // user has been granted access to yet, and they have no way to
+            // create one themselves. Show that plainly instead of trying
+            // (and silently failing) to auto-create.
+            setMatters([]);
+            return;
+          }
+          const created = await api.createMatter("New matter");
+          setMatters([created]);
+          selectMatter(created.id);
+          startEditingName(created.name);
+          return;
+        }
+
+        setMatters(fetched);
+        const storedId = localStorage.getItem(SELECTED_MATTER_STORAGE_KEY);
+        const stillExists = storedId && fetched.some((m) => m.id === storedId);
+        selectMatter(stillExists ? storedId! : fetched[0].id);
+      })
+      .catch((err) => setError(err.message));
+    // Deliberately run once — guarded by bootstrapped, not by dependencies.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function handleCreateMatter() {
-    if (!newMatterName.trim()) return;
     setCreating(true);
     try {
       setError(null);
-      await api.createMatter(newMatterName.trim());
-      setNewMatterName("");
-      refresh();
+      const created = await api.createMatter("New matter");
+      setMatters((prev) => [created, ...(prev ?? [])]);
+      selectMatter(created.id);
+      startEditingName(created.name);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -58,80 +115,136 @@ export function EddWorkbenchWorkspace({ apiBaseUrl = "http://localhost:4430/api"
     }
   }
 
-  const selectedMatter = matters?.find((m) => m.id === selectedMatterId) ?? null;
+  async function commitName() {
+    if (committingRef.current) return;
+    if (cancelledRef.current) {
+      cancelledRef.current = false;
+      return;
+    }
+    committingRef.current = true;
+    try {
+      const trimmed = nameInput.trim();
+      if (!selectedMatterId || !trimmed) {
+        // Never send an empty rename — treat it the same as Escape.
+        setEditingName(false);
+        return;
+      }
+      setError(null);
+      const updated = await api.updateMatter(selectedMatterId, trimmed);
+      setMatters((prev) => prev?.map((m) => (m.id === updated.id ? updated : m)) ?? prev);
+      setEditingName(false);
+    } catch (err) {
+      // Stay in edit mode with the attempted value so the user can retry
+      // rather than silently losing what they typed.
+      setError((err as Error).message);
+    } finally {
+      committingRef.current = false;
+    }
+  }
 
-  if (selectedMatter) {
+  function cancelEditingName() {
+    cancelledRef.current = true;
+    setEditingName(false);
+  }
+
+  async function handleLogout() {
+    // Best-effort — a failure here must never block the user from actually
+    // logging out.
+    await api.recordLogout().catch(() => {});
+    if (selectedMatterId) closeViewerWindowForMatter(selectedMatterId);
+    localStorage.removeItem(SELECTED_MATTER_STORAGE_KEY);
+    onLogout?.();
+  }
+
+  const canCreateMatters = me?.role === "admin" || me?.role === "litigation_support";
+
+  // Distinct from the plain "still loading" case below — this is a known,
+  // final state (the fetch succeeded; there's just nothing this user can
+  // see), not a transient one, so it must never be confused with "Loading…"
+  // by checking matters === null rather than its length.
+  if (matters?.length === 0) {
     return (
       <div className="app">
         <header className="topbar">
-          <button type="button" className="topbar-btn" style={{ marginLeft: 0, background: "none" }} onClick={() => setSelectedMatterId(null)}>
-            ← Back to matters
-          </button>
           <div className="brand">
             <span className="mark">eD</span>
-            <h1>{selectedMatter.name}</h1>
           </div>
           {onLogout && (
-            <button type="button" className="topbar-btn" onClick={onLogout}>
+            <button type="button" className="topbar-btn" onClick={handleLogout}>
               Log out
             </button>
           )}
         </header>
-        <main className="layout">
-          <MatterDetail api={api} matterId={selectedMatter.id} />
-        </main>
+        <p className="empty-note" style={{ padding: 24 }}>
+          You don't have access to any matters yet. Ask an admin to add you to one.
+        </p>
+        {error && <p className="bulk-note">{error}</p>}
+      </div>
+    );
+  }
+
+  const selectedMatter = matters?.find((m) => m.id === selectedMatterId) ?? null;
+  const canManageAccess = !!me && !!selectedMatter && (me.role === "admin" || me.userId === selectedMatter.createdBy);
+
+  if (!matters || !selectedMatter) {
+    return (
+      <div className="app">
+        <p className="empty-note">Loading…</p>
+        {error && <p className="bulk-note">{error}</p>}
       </div>
     );
   }
 
   return (
-    <div className="matter-screen">
-      <div className="matter-card">
-        <div className="brand" style={{ marginBottom: 18 }}>
-          <span className="mark" style={{ borderColor: "var(--navy)", color: "var(--navy)" }}>
-            eD
-          </span>
-          <div>
-            <h1>EDD Workbench</h1>
-            <span className="sub" style={{ color: "var(--ink-soft)" }}>
-              Select or create a matter
-            </span>
-          </div>
-        </div>
-
-        {error && <p className="bulk-note">{error}</p>}
-
-        {!matters ? (
-          <p className="empty-note">Loading…</p>
-        ) : matters.length === 0 ? (
-          <p className="empty-note">No matters yet.</p>
-        ) : (
-          <div className="matter-list">
-            {matters.map((matter) => (
-              <div key={matter.id} role="button" tabIndex={0} className="matter-list-item" onClick={() => setSelectedMatterId(matter.id)}>
-                <span className="matter-name">{matter.name}</span>
-                {matter.referenceCode && <span className="muted">{matter.referenceCode}</span>}
-                <span className="chip" style={{ background: `${STATUS_COLORS[matter.status] ?? "#5B6272"}22`, color: STATUS_COLORS[matter.status] ?? "#5B6272" }}>
-                  {matter.status}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <div className="custom-tag-row" style={{ marginTop: 16 }}>
-          <input placeholder="New matter name" value={newMatterName} onChange={(e) => setNewMatterName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleCreateMatter()} />
-          <button type="button" onClick={handleCreateMatter} disabled={creating}>
-            {creating ? "Creating…" : "Create"}
+    <div className="app">
+      <header className="topbar">
+        <select className="matter-select" value={selectedMatter.id} onChange={(e) => selectMatter(e.target.value)} aria-label="Select matter">
+          {matters.map((matter) => (
+            <option key={matter.id} value={matter.id}>
+              {matter.name}
+            </option>
+          ))}
+        </select>
+        {canCreateMatters && (
+          <button type="button" className="topbar-btn" style={{ marginLeft: 0 }} onClick={handleCreateMatter} disabled={creating}>
+            {creating ? "Creating…" : "Create Matter"}
           </button>
+        )}
+        <div className="brand">
+          <span className="mark">eD</span>
+          {editingName ? (
+            <input
+              className="matter-name-input"
+              autoFocus
+              value={nameInput}
+              onChange={(e) => setNameInput(e.target.value)}
+              onFocus={(e) => e.target.select()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.currentTarget.blur();
+                } else if (e.key === "Escape") {
+                  cancelEditingName();
+                }
+              }}
+              onBlur={commitName}
+            />
+          ) : (
+            <h1 className="matter-name-display" role="button" tabIndex={0} onClick={() => startEditingName(selectedMatter.name)}>
+              {selectedMatter.name}
+            </h1>
+          )}
         </div>
-
+        {me?.role === "admin" && <WorkerHealthBar api={api} />}
         {onLogout && (
-          <button type="button" className="clear-filters" style={{ marginTop: 12 }} onClick={onLogout}>
+          <button type="button" className="topbar-btn" onClick={handleLogout}>
             Log out
           </button>
         )}
-      </div>
+      </header>
+      {error && <p className="bulk-note">{error}</p>}
+      <main className="layout">
+        <MatterDetail api={api} matterId={selectedMatter.id} canManageAccess={canManageAccess} />
+      </main>
     </div>
   );
 }

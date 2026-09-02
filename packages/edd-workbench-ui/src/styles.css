@@ -104,10 +104,52 @@ header.topbar {
   margin: 0;
   letter-spacing: 0.2px;
 }
+.matter-name-display {
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 2px 6px;
+  margin: -2px -6px;
+}
+.matter-name-display:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+.matter-name-input {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  font-family: inherit;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 3px;
+  padding: 2px 6px;
+  margin: -3px -6px;
+}
+.matter-name-input:focus {
+  outline: none;
+  border-color: #fff;
+}
 .brand .sub {
   font-size: 11px;
   color: #b9c1d6;
   font-family: var(--mono);
+}
+.matter-select {
+  background: none;
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  padding: 7px 10px;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 12.5px;
+  max-width: 220px;
+}
+.matter-select:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+.matter-select option {
+  color: var(--ink);
+  background: #fff;
 }
 .topbar-btn {
   background: none;
@@ -122,7 +164,22 @@ header.topbar {
 .topbar-btn:hover {
   background: rgba(255, 255, 255, 0.1);
 }
-
+.worker-health-bar {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.75);
+}
+.worker-health-chip {
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+.worker-health-chip.stalled {
+  border-color: var(--seal);
+  color: var(--seal);
+}
 /* MAIN GRID */
 main.layout {
   display: flex;
@@ -151,7 +208,11 @@ main.layout {
   overflow: hidden;
 }
 .col-center {
-  flex: 1 1 auto;
+  /* flex-basis 0 (not auto) — with an empty-state div and no wide table
+     inside (zero documents), an auto content-based basis let this column
+     render narrower than the real remaining space in some cases; 0 always
+     fills 100% of whatever's left over regardless of content. */
+  flex: 1 1 0;
   display: flex;
   flex-direction: column;
   min-width: 200px;
@@ -327,6 +388,49 @@ h2.panel-title {
   line-height: 1.5;
   margin-top: 2px;
 }
+.access-list {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.access-list tr:not(:last-child) {
+  border-bottom: 1px solid var(--line);
+}
+.access-list-name {
+  padding: 6px 4px;
+  color: var(--ink);
+}
+.access-list-remove {
+  width: 20px;
+  text-align: right;
+}
+.access-list-remove-btn,
+.access-list-add-btn {
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1;
+  padding: 2px 7px;
+  cursor: pointer;
+}
+.access-list-remove-btn:hover,
+.access-list-add-btn:hover {
+  border-color: var(--navy);
+  color: var(--navy);
+}
+.access-list-add-btn {
+  margin-top: 6px;
+}
+.access-list-select {
+  width: 100%;
+  margin-top: 6px;
+  padding: 5px 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 12px;
+}
 
 /* CENTER TABLE */
 .table-toolbar {
@@ -421,12 +525,23 @@ h2.panel-title {
 }
 .table-wrap {
   flex: 1;
+  width: 100%;
   /* Without this, a flex item's default min-height:auto keeps it as tall
      as its content demands (the whole table, however many rows) instead
      of shrinking to the space actually available — the table then grows
      the whole page instead of scrolling internally. Classic flexbox
      overflow gotcha. */
   min-height: 0;
+  /* Same idea, horizontal axis — the whole point of the resized/wide
+     table.reg below is that it grows wider than this wrapper on purpose;
+     without min-width:0 this wrapper could refuse to be the size it's
+     told to be (width:100%, above) and expand to match instead of
+     scrolling internally. */
+  min-width: 0;
+  /* Both axes: vertical for many rows (as before), horizontal now that
+     resizable columns (table.reg's own width, below) can grow past what
+     fits — this is the "only appears when needed" scrollbar, not a
+     permanently-visible one. */
   overflow: auto;
   position: relative;
 }
@@ -438,7 +553,16 @@ h2.panel-title {
   background: var(--navy-soft);
 }
 table.reg {
-  width: 100%;
+  /* auto + min-width:100% (not a flat 100%) — with table-layout:fixed and
+     an auto width, the spec-defined behavior is "use the sum of the
+     column widths" as the table's own width, so widening a column past
+     what fits genuinely grows the table (letting .table-wrap's own
+     overflow-x:auto produce a real scrollbar) instead of every column
+     being silently squeezed back down to fit 100% regardless of what was
+     dragged. min-width:100% keeps today's "fills the panel" look intact
+     when the columns' combined width is still narrower than the panel. */
+  width: auto;
+  min-width: 100%;
   border-collapse: collapse;
   font-size: 12px;
   table-layout: fixed;
@@ -467,6 +591,25 @@ table.reg thead th:hover {
 }
 table.reg thead th.sorted {
   color: var(--navy);
+}
+/* th already has position:sticky (above), which — like any non-static
+   position — establishes the containing block this anchors against. */
+.col-resize-th-handle {
+  /* right:0, not a negative offset straddling the border — the th itself
+     has overflow:hidden (for its own text-ellipsis truncation), which
+     would clip a handle positioned outside its bounds. */
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 3;
+  touch-action: none;
+}
+.col-resize-th-handle:hover,
+.col-resize-th-handle.dragging {
+  background: var(--navy-soft);
 }
 table.reg tbody td {
   padding: 0 10px;
@@ -525,7 +668,9 @@ table.reg tbody tr.active {
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  width: 100%;
   height: 100%;
+  box-sizing: border-box;
   color: var(--ink-soft);
   text-align: center;
   padding: 40px;
@@ -799,6 +944,30 @@ table.reg tbody tr.active {
   border-color: transparent;
   color: #fff;
 }
+/* LOGIN / LOADING SCREENS (apps/edd-workbench/client/src/main.tsx) */
+.matter-screen {
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--paper);
+}
+.matter-card {
+  width: 420px;
+  max-width: 90vw;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 28px 26px;
+  box-shadow: 0 4px 24px rgba(27, 33, 48, 0.08);
+}
+.matter-card h1 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--ink);
+}
+
 .custom-tag-row {
   display: flex;
   gap: 6px;
@@ -842,63 +1011,6 @@ table.reg tbody tr.active {
   flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 10px;
-}
-
-/* MATTER PICKER */
-.matter-screen {
-  height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--paper);
-}
-.matter-card {
-  width: 420px;
-  max-width: 90vw;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 28px 26px;
-  box-shadow: 0 4px 24px rgba(27, 33, 48, 0.08);
-}
-.matter-card h1 {
-  font-size: 16px;
-  font-weight: 600;
-  margin: 0;
-  color: var(--ink);
-}
-.matter-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  max-height: 280px;
-  overflow-y: auto;
-}
-.matter-list-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  background: var(--paper);
-  text-align: left;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--ink);
-  cursor: pointer;
-}
-.matter-list-item:hover {
-  border-color: var(--navy);
-  background: var(--navy-soft);
-}
-.matter-list-item .matter-name {
-  font-weight: 600;
-  flex: 1;
-}
-.matter-list-item .muted {
-  margin-left: auto;
 }
 
 .custom-tag-row {

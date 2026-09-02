@@ -23,6 +23,8 @@ export interface PstMessageRecord {
   date: Date | null;
   bodyText: string | null;
   bodyHtml: string | null;
+  /** The real PR_MESSAGE_SIZE property (`message.messageSize`, a `long`) — the sum, in bytes, of every property on the message object, not an approximation derived from body/attachment lengths. */
+  sizeBytes: number;
   attachmentFilenames: string[];
   /** Real attachment bytes, not just names — same shape/rationale as msg.ts's/eml.ts's own `attachments` field: used to expand a PST message into child documents via ingest.ts's existing expandAttachments(), completely unmodified. Only BY_VALUE attachments end up here; an EMBEDDED attachment (a forwarded original message) is recursed into as its own yielded PstMessageRecord instead — see messagesFromItem below. */
   attachments: PstAttachment[];
@@ -138,6 +140,7 @@ function toRecord(message: PSTMessage, folderPath: string, messageClass: string)
     // other extractor's optional fields, rather than treating an empty
     // string as real, renderable HTML.
     bodyHtml: message.bodyHTML ? stripNulBytes(message.bodyHTML) || null : null,
+    sizeBytes: message.messageSize.toNumber(),
     attachmentFilenames: filenames,
     attachments,
   };

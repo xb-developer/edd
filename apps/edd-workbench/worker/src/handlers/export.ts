@@ -4,7 +4,7 @@ import archiver from "archiver";
 import { stringify } from "csv-stringify/sync";
 import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
-import { withOrgSession, s3Client, formatGuid, DOCUMENTS_BUCKET } from "@xbundle/edd-workbench-core";
+import { withOrgSession, s3Client, formatGuid, DOCUMENTS_BUCKET, MATTER_DOCUMENT_TREE_CTE } from "@xbundle/edd-workbench-core";
 
 interface ExportMessage {
   exportId: string;
@@ -26,7 +26,7 @@ interface DocumentForZipRow {
 
 interface DocumentForCsvRow {
   guid_number: number;
-  parent_guid_number: number | null;
+  family_guid_number: number | null;
   original_filename: string;
   content_type_detected: string;
   size_bytes: string;
@@ -61,8 +61,18 @@ function formatDateCell(value: Date | null): string {
  * finalize() (or finalizing before any entries are appended) deadlocks.
  */
 async function buildDocumentsZip(client: PoolClient, orgId: string, job: ExportJobRow): Promise<string> {
+  // Entry names use each document's DISPLAYED guid (computed from its
+  // current tree position, same as the UI shows — see documentTree.ts), not
+  // the raw guid_number column, so a partial export names files exactly the
+  // way a reviewer would recognize them on screen. This still requires
+  // walking the WHOLE matter's tree (not just the exported subset) — a
+  // document's displayed number can't be known in isolation.
   const docs = await client.query<DocumentForZipRow>(
-    "SELECT guid_number, extension, s3_key FROM documents WHERE matter_id = $1 AND id = ANY($2::uuid[]) ORDER BY guid_number",
+    `${MATTER_DOCUMENT_TREE_CTE}
+     SELECT n.display_guid_number AS guid_number, n.extension, n.s3_key
+     FROM numbered n
+     WHERE n.id = ANY($2::uuid[])
+     ORDER BY n.sort_path`,
     [job.matter_id, job.document_ids],
   );
 
@@ -111,30 +121,36 @@ const CSV_COLUMNS = ["GUID", "Family GUID", "Filename", "Type", "Size", "Date", 
 
 /**
  * One SQL query joining document_tags/tags (comma-joined tag names) and a
- * self-join on parent_document_id for the Family GUID (same self-join
- * pattern documents.ts's own DOCUMENT_SELECT already uses), stringified via
- * csv-stringify and uploaded as a plain PutObjectCommand (small enough to
- * hold in memory as a string, unlike the zip path).
+ * self-join on family_document_id for the Family GUID — the family ROOT's
+ * displayed guid, matching documents.ts's own DTO semantics (family root,
+ * not direct parent — those coincide at depth 1, which is why a same-named
+ * bug joining on parent_document_id here went unnoticed until this file's
+ * queries were rewritten to share documentTree.ts's tree-order numbering
+ * anyway). Stringified via csv-stringify and uploaded as a plain
+ * PutObjectCommand (small enough to hold in memory as a string, unlike the
+ * zip path).
  */
 async function buildPropertiesCsv(client: PoolClient, orgId: string, job: ExportJobRow): Promise<string> {
   const rows = await client.query<DocumentForCsvRow>(
-    `SELECT d.guid_number, p.guid_number AS parent_guid_number, d.original_filename, d.content_type_detected,
-            d.size_bytes, d.doc_date, d.file_modified_at, d.author, d.metadata,
+    `${MATTER_DOCUMENT_TREE_CTE}
+     SELECT n.display_guid_number AS guid_number, f.display_guid_number AS family_guid_number,
+            n.original_filename, n.content_type_detected,
+            n.size_bytes, n.doc_date, n.file_modified_at, n.author, n.metadata,
             COALESCE(string_agg(t.name, ', ' ORDER BY t.name), '') AS tags
-     FROM documents d
-     LEFT JOIN documents p ON p.id = d.parent_document_id
-     LEFT JOIN document_tags dt ON dt.document_id = d.id
+     FROM numbered n
+     LEFT JOIN numbered f ON f.id = n.family_document_id
+     LEFT JOIN document_tags dt ON dt.document_id = n.id
      LEFT JOIN tags t ON t.id = dt.tag_id
-     WHERE d.matter_id = $1 AND d.id = ANY($2::uuid[])
-     GROUP BY d.id, d.guid_number, p.guid_number, d.original_filename, d.content_type_detected,
-              d.size_bytes, d.doc_date, d.file_modified_at, d.author, d.metadata
-     ORDER BY d.guid_number`,
+     WHERE n.id = ANY($2::uuid[])
+     GROUP BY n.id, n.display_guid_number, f.display_guid_number, n.original_filename, n.content_type_detected,
+              n.size_bytes, n.doc_date, n.file_modified_at, n.author, n.metadata, n.sort_path
+     ORDER BY n.sort_path`,
     [job.matter_id, job.document_ids],
   );
 
   const records = rows.rows.map((row) => ({
     GUID: formatGuid(row.guid_number),
-    "Family GUID": formatGuid(row.parent_guid_number ?? row.guid_number),
+    "Family GUID": formatGuid(row.family_guid_number ?? row.guid_number),
     Filename: row.original_filename,
     Type: row.content_type_detected,
     Size: row.size_bytes,

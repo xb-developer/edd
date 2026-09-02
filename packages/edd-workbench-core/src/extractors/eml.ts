@@ -23,6 +23,26 @@ function addressText(value: { text: string } | { text: string }[] | undefined): 
   return Array.isArray(value) ? value.map((v) => v.text).join(", ") : value.text;
 }
 
+/**
+ * A real, plain "unnamed" (no extension at all) is exactly what a forwarded
+ * email attached without an explicit filename comes back as from
+ * mailparser — confirmed against a real Outlook-forwarded message, not a
+ * hypothetical: Outlook routinely sends a `message/rfc822` part with only
+ * creation-date/modification-date on its Content-Disposition, no filename
+ * param at all. Left as bare "unnamed", ingest.ts's own
+ * `detectContentType` (extension-based) has nothing to key off and files
+ * it under "other" — a real dead end for attachment recursion, since
+ * "other" never gets parsed or expanded. A `message/rfc822` part is
+ * unambiguously a real email regardless of what (if anything) its own
+ * filename param says, so it gets a real ".eml" extension here — the one
+ * content-type this actually matters for, since it's the one that must
+ * recurse.
+ */
+function filenameFor(attachment: { filename?: string; contentType: string }): string {
+  if (attachment.filename) return attachment.filename;
+  return attachment.contentType === "message/rfc822" ? "unnamed.eml" : "unnamed";
+}
+
 /** Parses a .eml (MIME) file's bytes into the fields the results table/viewer need. Pure — no I/O beyond the buffer it's given. */
 export async function extractEmlMetadata(buffer: Buffer): Promise<EmlMetadata> {
   const parsed = await simpleParser(buffer);
@@ -46,7 +66,7 @@ export async function extractEmlMetadata(buffer: Buffer): Promise<EmlMetadata> {
     date: parsed.date ?? null,
     bodyText: parsed.text ?? null,
     bodyHtml: typeof parsed.html === "string" ? parsed.html : null,
-    attachmentFilenames: realAttachments.map((a) => a.filename ?? "unnamed"),
-    attachments: realAttachments.map((a) => ({ filename: a.filename ?? "unnamed", content: a.content })),
+    attachmentFilenames: realAttachments.map(filenameFor),
+    attachments: realAttachments.map((a) => ({ filename: filenameFor(a), content: a.content })),
   };
 }

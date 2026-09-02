@@ -1,4 +1,15 @@
-import type { MatterDTO, DocumentDTO, TagSetDTO, TagDTO, InitUploadFileDTO, InitUploadResultDTO, ExportJobDTO } from "./types";
+import type {
+  MatterDTO,
+  DocumentDTO,
+  TagSetDTO,
+  TagDTO,
+  InitUploadFileDTO,
+  InitUploadResultDTO,
+  ExportJobDTO,
+  MatterMemberDTO,
+  MatterMemberCandidateDTO,
+  WorkerStatusDTO,
+} from "./types";
 
 /**
  * `getAccessToken` is the one capability the browser host must inject — the
@@ -37,12 +48,21 @@ export function createApiClient(baseUrl: string, getAccessToken: () => Promise<s
   }
 
   return {
+    /** The caller's own local identity — userId/role aren't otherwise knowable client-side (Auth0 only ever exposes sub/email). */
+    getMe: () => request<{ userId: string; orgId: string; role: string; email: string }>("/me"),
+
     getMatters: () => request<MatterDTO[]>("/matters"),
 
     createMatter: (name: string, referenceCode?: string) =>
       request<MatterDTO>("/matters", {
         method: "POST",
         body: JSON.stringify({ name, referenceCode }),
+      }),
+
+    updateMatter: (id: string, name: string) =>
+      request<MatterDTO>(`/matters/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name }),
       }),
 
     getMatterDocuments: (matterId: string) => request<DocumentDTO[]>(`/matters/${matterId}/documents`),
@@ -54,6 +74,20 @@ export function createApiClient(baseUrl: string, getAccessToken: () => Promise<s
 
     deleteDocument: (matterId: string, documentId: string) =>
       request<void>(`/matters/${matterId}/documents/${documentId}`, { method: "DELETE" }),
+
+    /** Rejects the whole request (deletes nothing) if any id doesn't belong to this matter — see documents.ts's own bulk DELETE route. */
+    bulkDeleteDocuments: (matterId: string, documentIds: string[]) =>
+      request<{ deletedCount: number }>(`/matters/${matterId}/documents`, {
+        method: "DELETE",
+        body: JSON.stringify({ documentIds }),
+      }),
+
+    /** Resets each document to 'pending' and re-enqueues it — rejects the whole request if any isn't currently 'failed' (see documents.ts's own retry-ingest route). */
+    retryIngest: (matterId: string, documentIds: string[]) =>
+      request<{ retriedCount: number }>(`/matters/${matterId}/documents/retry-ingest`, {
+        method: "POST",
+        body: JSON.stringify({ documentIds }),
+      }),
 
     /** Assigns GUIDs and mints a presigned S3 PUT URL per file, in one batch — see documents.ts's init-upload route. The actual bytes never pass through this API; the caller PUTs directly to each returned uploadUrl. */
     initUpload: (matterId: string, files: InitUploadFileDTO[]) =>
@@ -106,6 +140,30 @@ export function createApiClient(baseUrl: string, getAccessToken: () => Promise<s
     /** 409s until the job's status is 'ready' — callers poll getExportStatus first. */
     getExportDownloadUrl: (matterId: string, exportId: string) =>
       request<{ downloadUrl: string }>(`/matters/${matterId}/exports/${exportId}/download-url`),
+
+    getMatterMembers: (matterId: string) => request<MatterMemberDTO[]>(`/matters/${matterId}/members`),
+
+    /** Org members (per Auth0) who don't already have access to this matter — backs the access-list panel's "+" dropdown. */
+    getMatterMemberCandidates: (matterId: string) => request<MatterMemberCandidateDTO[]>(`/matters/${matterId}/members/candidates`),
+
+    /** Grants access immediately — no separate save step. The server creates a local user row for this Auth0 identity if one doesn't exist yet. */
+    addMatterMember: (matterId: string, candidate: MatterMemberCandidateDTO) =>
+      request<MatterMemberDTO>(`/matters/${matterId}/members`, {
+        method: "POST",
+        body: JSON.stringify(candidate),
+      }),
+
+    removeMatterMember: (matterId: string, userId: string) =>
+      request<void>(`/matters/${matterId}/members/${userId}`, { method: "DELETE" }),
+
+    /** Fire-and-forget from the caller's side — see EddWorkbenchWorkspace.tsx's selectMatter. */
+    recordMatterLoad: (matterId: string) => request<void>(`/matters/${matterId}/audit-load`, { method: "POST" }),
+
+    /** Best-effort, called right before the actual Auth0 logout redirect — never let a failure here block logout. */
+    recordLogout: () => request<void>("/audit/logout", { method: "POST" }),
+
+    /** Admin-only server-side (403 otherwise) — live queue depth plus each queue's own worker heartbeat, backing the topbar's WorkerHealthBar. */
+    getWorkerStatus: () => request<WorkerStatusDTO>("/worker-status"),
   };
 }
 

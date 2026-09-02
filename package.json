@@ -10,7 +10,8 @@
     "apps/assemble/client",
     "apps/edd-workbench/server",
     "apps/edd-workbench/client",
-    "apps/edd-workbench/worker"
+    "apps/edd-workbench/worker",
+    "apps/edd-workbench/ocr-service"
   ],
   "scripts": {
     "dev:assemble:server": "npm run dev --workspace apps/assemble/server",
@@ -23,7 +24,6 @@
     "dev:edd-workbench:worker": "npm run dev --workspace apps/edd-workbench/worker",
     "dev:edd-workbench": "concurrently -n server,client,worker -c blue,green,yellow \"npm:dev:edd-workbench:server\" \"npm:dev:edd-workbench:client\" \"npm:dev:edd-workbench:worker\"",
     "migrate:edd-workbench": "npm run migrate --workspace @xbundle/edd-workbench-core",
-    "seed:edd-workbench:org": "npm run seed:org --workspace @xbundle/edd-workbench-core --",
     "test": "vitest",
     "test:run": "vitest run && npm run smoke --workspace @xbundle/edd-workbench-core",
     "test:ui": "vitest --ui"

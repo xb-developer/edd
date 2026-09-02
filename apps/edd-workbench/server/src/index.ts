@@ -5,13 +5,16 @@
 import "@xbundle/edd-workbench-core/src/loadEnv.js";
 import express from "express";
 import cors from "cors";
-import { requireValidToken, resolveOrgContext } from "./auth.js";
+import { requireValidToken, resolveOrgContext, requireMatterAccess } from "./auth.js";
 import { mattersRouter } from "./routes/matters.js";
-import { orgInvitesRouter } from "./routes/orgInvites.js";
 import { documentsRouter } from "./routes/documents.js";
 import { tagsRouter } from "./routes/tags.js";
 import { documentTagsRouter } from "./routes/documentTags.js";
 import { exportsRouter } from "./routes/exports.js";
+import { matterMembersRouter } from "./routes/matterMembers.js";
+import { matterAuditRouter } from "./routes/matterAudit.js";
+import { auditRouter } from "./routes/audit.js";
+import { workerStatusRouter } from "./routes/workerStatus.js";
 
 const PORT = process.env.EDD_WORKBENCH_SERVER_PORT ? Number(process.env.EDD_WORKBENCH_SERVER_PORT) : 4430;
 
@@ -55,12 +58,30 @@ app.get("/api/health", (_req, res) => {
 });
 
 app.use("/api", requireValidToken, resolveOrgContext);
+
+// The client has no other way to learn its own local identity (userId/role)
+// — it only ever sees Auth0's own sub/email otherwise. Needed so the UI can
+// decide things like "am I allowed to manage this matter's access list"
+// without duplicating that admin-or-creator logic into every matter DTO.
+app.get("/api/me", (req, res) => {
+  res.json(req.eddContext);
+});
+
+app.use("/api/audit", auditRouter);
+app.use("/api/worker-status", workerStatusRouter);
 app.use("/api/matters", mattersRouter);
-app.use("/api/org/invitations", orgInvitesRouter);
+// Every :matterId-scoped router below sits behind requireMatterAccess —
+// mounted once, on the shared path prefix, rather than repeated per router.
+// mattersRouter above is NOT behind it: matter creation/listing have no
+// :matterId yet, and PATCH /:matterId (rename) calls requireMatterAccess()
+// directly since its own mount is bare "/api/matters".
+app.use("/api/matters/:matterId", requireMatterAccess());
 app.use("/api/matters/:matterId/documents", documentsRouter);
 app.use("/api/matters/:matterId/tags", tagsRouter);
 app.use("/api/matters/:matterId/document-tags", documentTagsRouter);
 app.use("/api/matters/:matterId/exports", exportsRouter);
+app.use("/api/matters/:matterId/members", matterMembersRouter);
+app.use("/api/matters/:matterId/audit-load", matterAuditRouter);
 
 interface HttpError {
   status?: number;

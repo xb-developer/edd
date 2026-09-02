@@ -18,6 +18,8 @@ export type ContentType =
   | "tiff"
   | "pst"
   | "zip"
+  | "7z"
+  | "mbox"
   | "other";
 
 /**
@@ -89,6 +91,10 @@ export function detectContentType(filename: string): ContentType {
       return "pst";
     case "zip":
       return "zip";
+    case "7z":
+      return "7z";
+    case "mbox":
+      return "mbox";
     case "ppt":
     case "pps":
     case "pot":
@@ -108,5 +114,76 @@ export function detectContentType(filename: string): ContentType {
       return "other";
     default:
       return "other";
+  }
+}
+
+/**
+ * Real HTTP Content-Type for an S3 upload, by filename extension — a
+ * separate, finer-grained mapping from detectContentType's own internal
+ * ContentType enum (which deliberately folds every image extension into
+ * one "image" category, and doesn't need to distinguish .xls from .xlsx,
+ * etc.) because the S3 object's Content-Type header is what a browser
+ * actually uses to decide how to render a response — e.g. Chrome's native
+ * PDF viewer refuses to render an octet-stream response inline, so this
+ * needs real MIME precision, not the coarser internal category.
+ */
+export function mimeTypeFor(filename: string): string {
+  switch (filename.toLowerCase().split(".").pop() ?? "") {
+    case "pdf":
+      return "application/pdf";
+    case "png":
+      return "image/png";
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    case "gif":
+      return "image/gif";
+    case "bmp":
+      return "image/bmp";
+    case "docx":
+    case "docm":
+    case "dotm":
+      return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    case "xlsx":
+    case "xlsm":
+    case "xltx":
+      return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    case "xls":
+    case "xla":
+      return "application/vnd.ms-excel";
+    case "pptx":
+      return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+    case "eml":
+      return "message/rfc822";
+    case "msg":
+      return "application/vnd.ms-outlook";
+    case "txt":
+      return "text/plain";
+    case "doc":
+      return "application/msword";
+    case "rtf":
+      return "application/rtf";
+    case "odt":
+      return "application/vnd.oasis.opendocument.text";
+    case "ods":
+      return "application/vnd.oasis.opendocument.spreadsheet";
+    case "odp":
+      return "application/vnd.oasis.opendocument.presentation";
+    case "epub":
+      return "application/epub+zip";
+    case "html":
+    case "htm":
+      return "text/html";
+    case "csv":
+      return "text/csv";
+    case "tiff":
+    case "tif":
+      return "image/tiff";
+    case "zip":
+      return "application/zip";
+    case "7z":
+      return "application/x-7z-compressed";
+    default:
+      return "application/octet-stream";
   }
 }

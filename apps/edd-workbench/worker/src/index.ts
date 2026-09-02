@@ -6,35 +6,43 @@
 // sqsClient and the handlers' pool/s3Client all read env vars at
 // module-load time.
 import "@xbundle/edd-workbench-core/src/loadEnv.js";
-import { consumeQueue } from "./queues.js";
+import { consumeQueue } from "@xbundle/edd-workbench-core";
 import { handleIngestMessage } from "./handlers/ingest.js";
 import { handleExportMessage } from "./handlers/export.js";
+import { handleEmbeddingMessage } from "./handlers/embedding.js";
 
 const INGEST_QUEUE_URL = process.env.EDD_WORKBENCH_INGEST_QUEUE_URL;
 const EXPORT_QUEUE_URL = process.env.EDD_WORKBENCH_EXPORT_QUEUE_URL;
-if (!INGEST_QUEUE_URL || !EXPORT_QUEUE_URL) {
-  throw new Error("EDD_WORKBENCH_INGEST_QUEUE_URL and EDD_WORKBENCH_EXPORT_QUEUE_URL environment variables are required");
+const EMBEDDING_QUEUE_URL = process.env.EDD_WORKBENCH_EMBEDDING_QUEUE_URL;
+if (!INGEST_QUEUE_URL || !EXPORT_QUEUE_URL || !EMBEDDING_QUEUE_URL) {
+  throw new Error(
+    "EDD_WORKBENCH_INGEST_QUEUE_URL, EDD_WORKBENCH_EXPORT_QUEUE_URL, and EDD_WORKBENCH_EMBEDDING_QUEUE_URL environment variables are required",
+  );
 }
 
-console.log("EDD Workbench worker starting — consuming ingest and export queues");
+console.log("EDD Workbench worker starting — consuming ingest, export, and embedding queues");
 
 // Aborted on SIGTERM (what ECS sends on deploy/scale-down before killing
 // the task outright) — consumeQueue's AbortSignal support means this is a
-// real graceful shutdown, not just a testability hook: both loops finish
-// whatever single message they're mid-handling, then actually stop,
-// instead of the process being killed unconditionally mid-work.
+// real graceful shutdown, not just a testability hook: every loop finishes
+// whatever single message it's mid-handling, then actually stops, instead
+// of the process being killed unconditionally mid-work.
 const shutdownController = new AbortController();
 process.on("SIGTERM", () => {
   console.log("EDD Workbench worker received SIGTERM — finishing in-flight messages, then stopping");
   shutdownController.abort();
 });
 
-// Two independent long-poll loops in one process, matching the build plan's
-// "one uniform Fargate worker service, two queue consumers" decision (§1) —
-// not two separate services, and not per-message Lambda invocations.
+// Three independent long-poll loops in one process — embedding added
+// alongside ingest/export rather than as its own service (unlike OCR):
+// it calls the self-hosted embedding server's own OpenAI-compatible API
+// directly (see embeddingClient.ts), with no wrapper service of our own
+// to justify separate deployment/scaling infrastructure the way OCR's
+// Textract-specific REST facade did.
 await Promise.all([
-  consumeQueue(INGEST_QUEUE_URL, handleIngestMessage, shutdownController.signal),
-  consumeQueue(EXPORT_QUEUE_URL, handleExportMessage, shutdownController.signal),
+  consumeQueue(INGEST_QUEUE_URL, "ingest", handleIngestMessage, shutdownController.signal),
+  consumeQueue(EXPORT_QUEUE_URL, "export", handleExportMessage, shutdownController.signal),
+  consumeQueue(EMBEDDING_QUEUE_URL, "embedding", handleEmbeddingMessage, shutdownController.signal),
 ]);
 
 console.log("EDD Workbench worker stopped.");

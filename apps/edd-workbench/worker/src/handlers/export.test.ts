@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import JSZip from "jszip";
-import { Client } from "pg";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { GetObjectCommand, PutObjectCommand, CreateBucketCommand, HeadBucketCommand } from "@aws-sdk/client-s3";
 import { pool, withOrgSession, initMatterGuidCounter, nextMatterGuid, s3Client, DOCUMENTS_BUCKET, formatGuid } from "@xbundle/edd-workbench-core";
@@ -15,19 +14,11 @@ async function ensureBucket(): Promise<void> {
 }
 
 async function deleteTestOrg(orgId: string): Promise<void> {
-  const client = new Client({ connectionString: "postgres://postgres:postgres@localhost:5432/edd_workbench_test" });
-  await client.connect();
-  await client.query("DELETE FROM organizations WHERE id = $1", [orgId]);
-  await client.end();
+  await withOrgSession(orgId, (client) => client.query("DELETE FROM matters WHERE org_id = $1", [orgId]));
 }
 
 async function createTestOrgAndMatter(namePrefix: string) {
-  const orgId = randomUUID();
-  await pool.query("INSERT INTO organizations (id, name, auth0_org_id) VALUES ($1, $2, $3)", [
-    orgId,
-    `${namePrefix} test org`,
-    `test-org-${orgId}`,
-  ]);
+  const orgId = `org_test_${randomUUID()}`;
 
   return withOrgSession(orgId, async (client) => {
     const matterRow = await client.query<{ id: string }>("INSERT INTO matters (org_id, name) VALUES ($1, $2) RETURNING id", [
@@ -201,6 +192,60 @@ describe("handleExportMessage — documents kind", () => {
     expect(Object.keys(zip.files)).toEqual([]);
   });
 
+  it("names each zip entry by its RENUMBERED tree-order guid, not its raw insertion-order guid_number — and reflects the whole matter's tree even for a partial export", async () => {
+    const { orgId, matterId } = await createTestOrgAndMatter("export-zip-renumber");
+    currentOrgId = orgId;
+
+    const root = await insertDocument({ orgId, matterId, filename: "root.eml", extension: "eml", body: Buffer.from("root") });
+    const nested = await insertDocument({
+      orgId,
+      matterId,
+      filename: "nested.eml",
+      extension: "eml",
+      parentDocumentId: root.documentId,
+      body: Buffer.from("nested"),
+    });
+    const pdf = await insertDocument({
+      orgId,
+      matterId,
+      filename: "sibling.pdf",
+      extension: "pdf",
+      parentDocumentId: root.documentId,
+      body: Buffer.from("sibling"),
+    });
+    // nested's own attachment — inserted last (raw guid_number highest),
+    // but belongs one level under `nested`, ahead of `pdf` in tree order.
+    const attachmentBody = Buffer.from("nested attachment");
+    const attachmentS3Key = `tenants/test/documents/${randomUUID()}/original.jpg`;
+    await s3Client.send(new PutObjectCommand({ Bucket: DOCUMENTS_BUCKET, Key: attachmentS3Key, Body: attachmentBody }));
+    const attachmentId = randomUUID();
+    await withOrgSession(orgId, async (client) => {
+      const guidNumber = await nextMatterGuid(client, matterId);
+      await client.query(
+        `INSERT INTO documents (id, org_id, matter_id, parent_document_id, family_document_id, depth, guid_number, original_filename, extension, size_bytes, s3_key, content_type_detected, ingest_status)
+         VALUES ($1, $2, $3, $4, $5, 2, $6, 'attachment.jpg', 'jpg', $7, $8, 'image', 'ready')`,
+        [attachmentId, orgId, matterId, nested.documentId, root.documentId, guidNumber, attachmentBody.byteLength, attachmentS3Key],
+      );
+    });
+
+    // A partial export — only `pdf` and the nested attachment — must still
+    // number them as if the whole matter's tree were computed (1: root,
+    // 2: nested, 3: attachment, 4: pdf), not just 1/2 for the two selected.
+    const exportId = await createExportJob({ orgId, matterId, kind: "documents", documentIds: [pdf.documentId, attachmentId] });
+    await handleExportMessage(JSON.stringify({ exportId, orgId }));
+
+    const job = await getExportJob(orgId, exportId);
+    expect(job.status).toBe("ready");
+
+    const object = await s3Client.send(new GetObjectCommand({ Bucket: DOCUMENTS_BUCKET, Key: job.result_s3_key }));
+    const chunks: Buffer[] = [];
+    for await (const chunk of object.Body as AsyncIterable<Buffer>) chunks.push(chunk);
+    const zip = await JSZip.loadAsync(Buffer.concat(chunks));
+
+    expect(Object.keys(zip.files).sort()).toEqual(["000003.jpg", "000004.pdf"]);
+    expect((await zip.file("000003.jpg")!.async("nodebuffer")).equals(attachmentBody)).toBe(true);
+  });
+
   it("marks the job failed, with a recorded error, when a selected document's S3 object doesn't actually exist", async () => {
     const { orgId, matterId } = await createTestOrgAndMatter("export-zip-missing-s3");
     currentOrgId = orgId;
@@ -320,5 +365,55 @@ describe("handleExportMessage — properties kind", () => {
     // that.
     expect(parentLine).toContain("2026-01-05T00:00:00.000Z");
     expect(parentLine).not.toMatch(/,\d{10,},/); // no raw epoch-ms number anywhere in this row
+  });
+
+  // Two levels deep, "direct parent" and "family root" are different
+  // documents — the case the old parent_document_id self-join got wrong
+  // (undetectable at depth 1, where they coincide, which is exactly why the
+  // original test above never caught it).
+  it("resolves the Family GUID column to the family ROOT, not the direct parent, two levels deep", async () => {
+    const { orgId, matterId } = await createTestOrgAndMatter("export-csv-family-root");
+    currentOrgId = orgId;
+
+    const root = await insertDocument({ orgId, matterId, filename: "mailbox.pst", extension: "pst", body: Buffer.from("root") });
+    const middle = await insertDocument({
+      orgId,
+      matterId,
+      filename: "message.eml",
+      extension: "eml",
+      parentDocumentId: root.documentId,
+      body: Buffer.from("middle"),
+    });
+    const leafId = randomUUID();
+    await withOrgSession(orgId, async (client) => {
+      const guidNumber = await nextMatterGuid(client, matterId);
+      await client.query(
+        `INSERT INTO documents (id, org_id, matter_id, parent_document_id, family_document_id, depth, guid_number, original_filename, extension, size_bytes, s3_key, content_type_detected, ingest_status)
+         VALUES ($1, $2, $3, $4, $5, 2, $6, 'attachment.jpg', 'jpg', 10, NULL, 'image', 'ready')`,
+        [leafId, orgId, matterId, middle.documentId, root.documentId, guidNumber],
+      );
+    });
+
+    const exportId = await createExportJob({ orgId, matterId, kind: "properties", documentIds: [root.documentId, middle.documentId, leafId] });
+    await handleExportMessage(JSON.stringify({ exportId, orgId }));
+
+    const job = await getExportJob(orgId, exportId);
+    expect(job.status).toBe("ready");
+
+    const object = await s3Client.send(new GetObjectCommand({ Bucket: DOCUMENTS_BUCKET, Key: job.result_s3_key }));
+    const chunks: Buffer[] = [];
+    for await (const chunk of object.Body as AsyncIterable<Buffer>) chunks.push(chunk);
+    const lines = Buffer.concat(chunks)
+      .toString("utf-8")
+      .trim()
+      .split("\n")
+      .map((line) => line.trimEnd());
+
+    const leafLine = lines.find((line) => line.includes("attachment.jpg"))!;
+    expect(leafLine).toBeTruthy();
+
+    // Renumbered display guids: root=1, middle=2, leaf=3 (insertion order
+    // already matches tree order here, so raw and computed coincide).
+    expect(leafLine.startsWith("000003,000001,")).toBe(true); // leaf's own GUID, then the ROOT's — not middle's (000002)
   });
 });

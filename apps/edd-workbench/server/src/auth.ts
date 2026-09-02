@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import { auth as jwtAuth } from "express-oauth2-jwt-bearer";
-import { withUserIdentitySession } from "@xbundle/edd-workbench-core";
+import { withOrgSession } from "@xbundle/edd-workbench-core";
+import { getOrganizationMemberContext } from "./auth0Management.js";
 
 const AUTH0_ISSUER_BASE_URL = process.env.AUTH0_ISSUER_BASE_URL;
 const AUTH0_AUDIENCE = process.env.AUTH0_AUDIENCE;
@@ -32,62 +33,44 @@ declare global {
 }
 
 /**
- * Runs after requireValidToken. Auth0 Organizations turned out to be
- * unavailable on this tenant's plan, so — unlike the original design — there
- * is no trusted org_id claim to read the caller's org from. Instead: upsert
- * their `users` row from the token's own identity claims (sub/email — safe
- * to trust, Auth0 already verified them), then look up which org(s) that
- * identity belongs to directly. A user with more than one membership gets
- * their earliest one — there's no multi-org picker yet (a real gap, not a
- * deliberate design choice; flagged as a fast-follow, not silently ignored).
- * 403s rather than 404s on "not a member of any org" — an authorization
+ * Runs after requireValidToken. Auth0 is the sole source of truth for
+ * identity and org membership — there is no local `users`/`organizations`
+ * table to upsert into or look anything up in. `sub` and `org_id` are
+ * trusted directly off the validated token; the caller's org-scoped role
+ * (and their email/name, for display) comes from a single cached Auth0
+ * Management API call (see auth0Management.ts's getOrganizationMemberContext
+ * — short-TTL cache, not a live call on every request).
+ *
+ * No `org_id` claim means the caller didn't log in through an Auth0
+ * Organization at all (this tenant's Login Experience is configured to
+ * force organization discovery, so this should only happen for a stale or
+ * malformed token) — 403, not a guessable fallback. There is nothing local
+ * left to fall back to now that org membership isn't app-managed data.
+ *
+ * 403s rather than 404s on "not a member of this org" — an authorization
  * fact, not a missing-resource one.
  */
 export async function resolveOrgContext(req: Request, res: Response, next: NextFunction): Promise<void> {
   const auth0UserId = req.auth?.payload.sub as string | undefined;
-  const email = req.auth?.payload.email as string | undefined;
+  const auth0OrgId = req.auth?.payload.org_id as string | undefined;
 
   if (!auth0UserId) {
     res.status(401).json({ error: "Token is missing required sub claim" });
     return;
   }
+  if (!auth0OrgId) {
+    res.status(403).json({ error: "Please log in through your organization" });
+    return;
+  }
 
   try {
-    const context = await withUserIdentitySession({ auth0UserId, email: email ?? "" }, async (client, userId) => {
-      const membershipRow = await client.query<{ org_id: string; role: Role }>(
-        "SELECT org_id, role FROM org_memberships WHERE user_id = $1 ORDER BY created_at LIMIT 1",
-        [userId],
-      );
-      if (membershipRow.rowCount! > 0) {
-        return { userId, orgId: membershipRow.rows[0].org_id, role: membershipRow.rows[0].role, email: email ?? "" };
-      }
-
-      // No membership yet — but this may be someone's very first login
-      // after being invited (see routes/orgInvites.ts): the invitation was
-      // necessarily created before their users row could possibly exist, so
-      // this is where it actually takes effect, matched on email. Only ever
-      // consumes a 'pending' row, so re-logging-in after acceptance (or a
-      // revoked/already-used invite) can't re-grant membership.
-      if (!email) return null;
-      const invitationRow = await client.query<{ id: string; org_id: string; role: Role }>(
-        "SELECT id, org_id, role FROM org_invitations WHERE email = $1 AND status = 'pending' LIMIT 1",
-        [email],
-      );
-      if (invitationRow.rowCount === 0) return null;
-
-      const { id: invitationId, org_id: orgId, role } = invitationRow.rows[0];
-      await client.query("INSERT INTO org_memberships (org_id, user_id, role) VALUES ($1, $2, $3)", [orgId, userId, role]);
-      await client.query("UPDATE org_invitations SET status = 'accepted', accepted_at = now() WHERE id = $1", [invitationId]);
-
-      return { userId, orgId, role, email };
-    });
-
+    const context = await getOrganizationMemberContext(auth0OrgId, auth0UserId);
     if (!context) {
-      res.status(403).json({ error: "You are not a member of any organization yet" });
+      res.status(403).json({ error: "You are not a member of this organization" });
       return;
     }
 
-    req.eddContext = context;
+    req.eddContext = { userId: auth0UserId, orgId: auth0OrgId, role: context.role, email: context.email };
     next();
   } catch (err) {
     next(err);
@@ -102,5 +85,36 @@ export function requireRole(...allowed: Role[]) {
       return;
     }
     next();
+  };
+}
+
+/**
+ * Mounted once, in front of every :matterId-scoped router (documents, tags,
+ * document-tags, exports, members) — see index.ts. Admins bypass the
+ * matter_members table entirely (and are never a row in it); everyone else
+ * needs an explicit grant. This is also what makes "a removed user's next
+ * REST call is rejected" true with no extra push/kill-session mechanism —
+ * every request re-checks matter_members fresh, so revocation is effective
+ * the instant the row is deleted.
+ */
+export function requireMatterAccess() {
+  return async (req: Request<{ matterId: string }>, res: Response, next: NextFunction): Promise<void> => {
+    const { orgId, userId, role } = req.eddContext!;
+    if (role === "admin") {
+      next();
+      return;
+    }
+    try {
+      const has = await withOrgSession(orgId, (client) =>
+        client.query("SELECT 1 FROM matter_members WHERE matter_id = $1 AND user_id = $2", [req.params.matterId, userId]),
+      );
+      if (has.rowCount === 0) {
+        res.status(403).json({ error: "You do not have access to this matter" });
+        return;
+      }
+      next();
+    } catch (err) {
+      next(err);
+    }
   };
 }

@@ -1,28 +1,17 @@
 import { randomUUID } from "node:crypto";
-import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { pool } from "./pool.js";
 import { withOrgSession } from "./session.js";
 import { formatGuid, initMatterGuidCounter, nextMatterGuid } from "./guidCounter.js";
-
-// edd_workbench_app deliberately has no DELETE grant on organizations
-// (migration 004 grants only SELECT/INSERT/UPDATE) — correct least-privilege
-// design, not a gap to paper over for test convenience. Cleanup therefore
-// needs the owner/superuser connection, same credentials as migrate.ts,
-// rather than the app pool the tests themselves exercise.
-const adminClient = new Client({ connectionString: "postgres://postgres:postgres@localhost:5432/edd_workbench_test" });
 
 describe("guidCounter", () => {
   let orgId: string;
   let matterId: string;
 
   beforeAll(async () => {
-    orgId = randomUUID();
-    await pool.query("INSERT INTO organizations (id, name, auth0_org_id) VALUES ($1, $2, $3)", [
-      orgId,
-      "guidCounter test org",
-      `test-org-${orgId}`,
-    ]);
+    // Opaque Auth0-shaped string, not a local uuid — no organizations table
+    // left to seed at all.
+    orgId = `org_test_${randomUUID()}`;
 
     matterId = await withOrgSession(orgId, async (client) => {
       const row = await client.query<{ id: string }>("INSERT INTO matters (org_id, name) VALUES ($1, $2) RETURNING id", [
@@ -36,11 +25,9 @@ describe("guidCounter", () => {
   });
 
   afterAll(async () => {
-    // Cascades to matters and matter_guid_counters (both ON DELETE CASCADE
-    // from organizations/matters — see migrations 005).
-    await adminClient.connect();
-    await adminClient.query("DELETE FROM organizations WHERE id = $1", [orgId]);
-    await adminClient.end();
+    // Cascades to matter_guid_counters (ON DELETE CASCADE from matters —
+    // see migration 005).
+    await withOrgSession(orgId, (client) => client.query("DELETE FROM matters WHERE org_id = $1", [orgId]));
     await pool.end();
   });
 

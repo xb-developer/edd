@@ -1,12 +1,10 @@
 import { randomUUID } from "node:crypto";
 import express from "express";
 import request from "supertest";
-import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CreateBucketCommand, HeadBucketCommand } from "@aws-sdk/client-s3";
 import { CreateQueueCommand, PurgeQueueCommand } from "@aws-sdk/client-sqs";
-import { pool, withOrgSession, initMatterGuidCounter, s3Client, sqsClient, DOCUMENTS_BUCKET } from "@xbundle/edd-workbench-core";
-import { consumeQueue } from "xbundle-edd-workbench-worker/src/queues.js";
+import { pool, withOrgSession, initMatterGuidCounter, s3Client, sqsClient, DOCUMENTS_BUCKET, consumeQueue } from "@xbundle/edd-workbench-core";
 import { handleIngestMessage } from "xbundle-edd-workbench-worker/src/handlers/ingest.js";
 import { documentsRouter } from "./routes/documents.js";
 import type { EddRequestContext } from "./auth.js";
@@ -67,34 +65,30 @@ describe("full ingest pipeline (end-to-end)", () => {
       await s3Client.send(new CreateBucketCommand({ Bucket: DOCUMENTS_BUCKET }));
     }
     await sqsClient.send(new CreateQueueCommand({ QueueName: "edd-workbench-ingest-test" }));
+    // The real ingest handler now unconditionally enqueues an embedding
+    // check once a document reaches 'ready' — this test drives that real
+    // handler, so this queue must exist too, not just the ingest one.
+    await sqsClient.send(new CreateQueueCommand({ QueueName: "edd-workbench-embedding-test" }));
     await sqsClient.send(new PurgeQueueCommand({ QueueUrl: INGEST_QUEUE_URL })).catch(() => {});
 
-    orgId = randomUUID();
-    await pool.query("INSERT INTO organizations (id, name, auth0_org_id) VALUES ($1, $2, $3)", [
-      orgId,
-      "e2e pipeline test org",
-      `test-org-${orgId}`,
-    ]);
+    orgId = `org_test_${randomUUID()}`;
+    userId = `auth0|${randomUUID()}`;
 
-    ({ matterId, userId } = await withOrgSession(orgId, async (client) => {
-      const userRow = await client.query<{ id: string }>(
-        "INSERT INTO users (auth0_user_id, email) VALUES ($1, $2) RETURNING id",
-        [`auth0|${randomUUID()}`, "tester@example.com"],
-      );
+    ({ matterId } = await withOrgSession(orgId, async (client) => {
       const matterRow = await client.query<{ id: string }>("INSERT INTO matters (org_id, name) VALUES ($1, $2) RETURNING id", [
         orgId,
         "e2e pipeline test matter",
       ]);
       await initMatterGuidCounter(client, matterRow.rows[0].id);
-      return { matterId: matterRow.rows[0].id, userId: userRow.rows[0].id };
+      return { matterId: matterRow.rows[0].id };
     }));
   });
 
   afterAll(async () => {
-    const client = new Client({ connectionString: "postgres://postgres:postgres@localhost:5432/edd_workbench_test" });
-    await client.connect();
-    await client.query("DELETE FROM organizations WHERE id = $1", [orgId]);
-    await client.end();
+    await withOrgSession(orgId, async (client) => {
+      await client.query("DELETE FROM audit_log WHERE org_id = $1", [orgId]);
+      await client.query("DELETE FROM matters WHERE org_id = $1", [orgId]);
+    });
     await pool.end();
   });
 
@@ -123,6 +117,7 @@ describe("full ingest pipeline (end-to-end)", () => {
     const controller = new AbortController();
     await consumeQueue(
       INGEST_QUEUE_URL,
+      "ingest",
       async (body) => {
         await handleIngestMessage(body);
         controller.abort();

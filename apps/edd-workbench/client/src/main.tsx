@@ -18,13 +18,14 @@ import "@xbundle/edd-workbench-ui/src/styles.css";
 // life of the page, and both AppShell and ViewerWindowShell below need it.
 const viewerWindowParams = parseViewerWindowParams(window.location.search);
 
-// Plain login, no `organization` param — Auth0 Organizations is unavailable
-// on this tenant's plan (see server/src/auth.ts's resolveOrgContext), so
-// the server resolves which org a caller belongs to from our own DB instead
-// of a trusted org_id token claim. Nothing here needs to know about orgs at
-// all; a user simply signs in (or signs up, via Auth0's own Universal Login
-// sign-up tab) with whatever email an admin invited (see
-// routes/orgInvites.ts) or was seeded with.
+// Plain login, no `organization` param — the tenant's Login Experience is
+// configured to prompt for the organization itself (see
+// server/src/auth.ts's resolveOrgContext), so the resulting token's
+// trusted org_id claim is all the server needs. Nothing here needs to
+// know about orgs at all; a user simply signs in with whatever Auth0
+// account has been added to the organization and assigned a role there
+// directly (Auth0 Organizations is the sole source of truth for identity
+// and org membership — there's no local invite system).
 function AppShell() {
   const { isAuthenticated, isLoading, loginWithRedirect, logout, getAccessTokenSilently } = useAuth0();
 

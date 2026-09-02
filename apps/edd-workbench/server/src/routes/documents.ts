@@ -3,7 +3,17 @@ import { Router, type Request } from "express";
 import { GetObjectCommand, PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { SendMessageCommand } from "@aws-sdk/client-sqs";
-import { withOrgSession, nextMatterGuid, formatGuid, s3Client, sqsClient, DOCUMENTS_BUCKET, detectContentType } from "@xbundle/edd-workbench-core";
+import {
+  withOrgSession,
+  nextMatterGuid,
+  formatGuid,
+  s3Client,
+  sqsClient,
+  DOCUMENTS_BUCKET,
+  detectContentType,
+  MATTER_DOCUMENT_TREE_CTE,
+  recordAuditEvent,
+} from "@xbundle/edd-workbench-core";
 
 // Read at module-load time, matching auth.ts/pool.ts's "fail loudly at
 // startup, not on first request" convention elsewhere in this codebase.
@@ -54,17 +64,24 @@ interface DocumentRow {
   created_at: string;
 }
 
-// Both queries below select from this same shape — two self-LEFT-JOINs, one
-// to the direct parent (parent_document_id) and one to the family root
-// (family_document_id, migration 018) — so a child's row already carries
-// both its parent's and its family root's guid_number, no separate lookup
-// needed. Kept as one constant so the two routes can't drift apart on
-// which columns are actually selected.
+// Both queries below select from the same shared tree CTE (see
+// documentTree.ts) — two self-LEFT-JOINs against its own `numbered` table,
+// one to the direct parent (parent_document_id) and one to the family root
+// (family_document_id, migration 018), so a child's row already carries
+// both its parent's and its family root's DISPLAY guid number, no separate
+// lookup needed. The displayed guid/parentGuid/familyGuid are computed from
+// each document's current tree position, not the raw guid_number column
+// (see documentTree.ts's own comment for why) — aliased here to the same
+// column names toDocumentDTO already reads, so that function needs no
+// changes. Kept as one constant so the two routes below can't drift apart
+// on which columns are actually selected.
 const DOCUMENT_SELECT = `
-  SELECT d.*, p.guid_number AS parent_guid_number, f.guid_number AS family_guid_number
-  FROM documents d
-  LEFT JOIN documents p ON p.id = d.parent_document_id
-  LEFT JOIN documents f ON f.id = d.family_document_id
+  ${MATTER_DOCUMENT_TREE_CTE}
+  SELECT n.*, n.display_guid_number AS guid_number,
+         p.display_guid_number AS parent_guid_number, f.display_guid_number AS family_guid_number
+  FROM numbered n
+  LEFT JOIN numbered p ON p.id = n.parent_document_id
+  LEFT JOIN numbered f ON f.id = n.family_document_id
 `;
 
 function toDocumentDTO(row: DocumentRow) {
@@ -108,8 +125,16 @@ documentsRouter.get("/", async (req: Request<{ matterId: string }>, res, next) =
     const { orgId } = req.eddContext!;
     const { matterId } = req.params;
 
+    // Both row order AND each row's own displayed guid/parentGuid/familyGuid
+    // come from the same tree walk (see documentTree.ts) — a flat
+    // `ORDER BY guid_number` (and showing that raw column as-is) both
+    // scramble the tree: a container's direct members get consecutive raw
+    // numbers, but a *grandchild* (e.g. an attachment of a nested email) is
+    // only inserted once that nested email is pulled off its own SQS
+    // message and reprocessed — by which point unrelated later documents
+    // may already have consumed intervening numbers.
     const rows = await withOrgSession(orgId, (client) =>
-      client.query<DocumentRow>(`${DOCUMENT_SELECT} WHERE d.matter_id = $1 ORDER BY d.guid_number`, [matterId]),
+      client.query<DocumentRow>(`${DOCUMENT_SELECT} ORDER BY n.sort_path`, [matterId]),
     );
 
     res.json(rows.rows.map(toDocumentDTO));
@@ -129,8 +154,12 @@ documentsRouter.get("/:id", async (req: Request<{ matterId: string; id: string }
     const { orgId } = req.eddContext!;
     const { matterId, id: documentId } = req.params;
 
+    // $1 (matterId) is consumed by the shared tree CTE itself — a document's
+    // displayed guid can't be known without first computing its whole
+    // matter's tree order, so this still walks the full matter even though
+    // only one row's worth of output is returned.
     const rows = await withOrgSession(orgId, (client) =>
-      client.query<DocumentRow>(`${DOCUMENT_SELECT} WHERE d.id = $1 AND d.matter_id = $2`, [documentId, matterId]),
+      client.query<DocumentRow>(`${DOCUMENT_SELECT} WHERE n.id = $2`, [matterId, documentId]),
     );
     if (rows.rowCount === 0) {
       res.status(404).json({ error: "Document not found" });
@@ -143,45 +172,162 @@ documentsRouter.get("/:id", async (req: Request<{ matterId: string; id: string }
   }
 });
 
-// Deletes a document (and, via ON DELETE CASCADE on parent_document_id,
-// any attachments expanded from it — see ingest.ts). Best-effort S3
-// cleanup for the document itself and its direct children only — a
-// grandchild (an attachment that was itself an email with its own
-// attachments) would still cascade-delete at the DB level but leave its S3
-// object orphaned; a storage-cleanup gap, not a correctness one, and not
-// worth a recursive query for a first pass at this feature. S3 failures
-// are logged, not thrown — the DB row (the thing the rest of the app
-// actually treats as "does this document exist") is the part that must
-// not silently fail to delete.
+// Shared by both the single-document and bulk-delete routes below. Deletes
+// every id in `documentIds` (and, via ON DELETE CASCADE on
+// parent_document_id, any attachments expanded from each — see ingest.ts).
+// Best-effort S3 cleanup for the documents themselves and their direct
+// children only — a grandchild (an attachment that was itself an email
+// with its own attachments) would still cascade-delete at the DB level but
+// leave its S3 object orphaned; a storage-cleanup gap, not a correctness
+// one, and not worth a recursive query for a first pass at this feature.
+// S3 failures are logged, not thrown — the DB rows (the thing the rest of
+// the app actually treats as "does this document exist") are the part
+// that must not silently fail to delete.
+async function deleteDocumentsWithS3Cleanup(orgId: string, actorUserId: string, matterId: string, documentIds: string[]): Promise<number> {
+  const s3Keys = await withOrgSession(orgId, async (client) => {
+    const rows = await client.query<{ s3_key: string; original_filename: string }>(
+      "SELECT s3_key, original_filename FROM documents WHERE matter_id = $1 AND (id = ANY($2::uuid[]) OR parent_document_id = ANY($2::uuid[]))",
+      [matterId, documentIds],
+    );
+    await client.query("DELETE FROM documents WHERE matter_id = $1 AND id = ANY($2::uuid[])", [matterId, documentIds]);
+    // One row per document actually removed — including cascade-deleted
+    // children (e.g. an email's own attachments), not just the ids the
+    // caller explicitly requested, since those rows disappear too.
+    for (const row of rows.rows) {
+      await recordAuditEvent(client, {
+        orgId,
+        actorUserId,
+        matterId,
+        action: "document.delete",
+        description: `Deleted file "${row.original_filename}"`,
+      });
+    }
+    return rows.rows.map((r) => r.s3_key);
+  });
+
+  await Promise.all(
+    s3Keys.map((key) =>
+      s3Client.send(new DeleteObjectCommand({ Bucket: DOCUMENTS_BUCKET, Key: key })).catch((err) => {
+        console.error(`Failed to delete S3 object ${key} during a delete of matter ${matterId}'s documents:`, err);
+      }),
+    ),
+  );
+
+  return s3Keys.length;
+}
+
 documentsRouter.delete("/:id", async (req: Request<{ matterId: string; id: string }>, res, next) => {
   try {
-    const { orgId } = req.eddContext!;
+    const { orgId, userId } = req.eddContext!;
     const { matterId, id: documentId } = req.params;
 
-    const s3Keys = await withOrgSession(orgId, async (client) => {
-      const rows = await client.query<{ s3_key: string }>(
-        "SELECT s3_key FROM documents WHERE matter_id = $1 AND (id = $2 OR parent_document_id = $2)",
-        [matterId, documentId],
-      );
-      if (rows.rowCount === 0) return null;
-      await client.query("DELETE FROM documents WHERE id = $1 AND matter_id = $2", [documentId, matterId]);
-      return rows.rows.map((r) => r.s3_key);
-    });
-
-    if (s3Keys === null) {
+    const exists = await withOrgSession(orgId, (client) =>
+      client.query("SELECT 1 FROM documents WHERE matter_id = $1 AND id = $2", [matterId, documentId]),
+    );
+    if (exists.rowCount === 0) {
       res.status(404).json({ error: "Document not found" });
       return;
     }
 
+    await deleteDocumentsWithS3Cleanup(orgId, userId, matterId, [documentId]);
+    res.status(204).send();
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Bulk delete for the table's checkbox-selection toolbar. Same
+// "reject the whole request rather than silently delete a partial set"
+// safety this codebase's own exportsRouter already established for its own
+// bulk documentIds body — a smuggled cross-matter id, a typo, or a race
+// with another delete must never result in deleting some-but-not-all of
+// what the caller asked for with no indication anything was skipped.
+documentsRouter.delete("/", async (req: Request<{ matterId: string }>, res, next) => {
+  try {
+    const { orgId, userId } = req.eddContext!;
+    const { matterId } = req.params;
+    const { documentIds } = req.body as { documentIds?: string[] };
+
+    if (!documentIds || documentIds.length === 0) {
+      res.status(400).json({ error: "documentIds is required and must be non-empty" });
+      return;
+    }
+
+    const owned = await withOrgSession(orgId, (client) =>
+      client.query<{ id: string }>("SELECT id FROM documents WHERE matter_id = $1 AND id = ANY($2::uuid[])", [matterId, documentIds]),
+    );
+    if (owned.rowCount !== documentIds.length) {
+      res.status(400).json({ error: "One or more documentIds do not belong to this matter" });
+      return;
+    }
+
+    const deletedCount = await deleteDocumentsWithS3Cleanup(orgId, userId, matterId, documentIds);
+    res.status(200).json({ deletedCount });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Bulk retry for the Processing Status filter's checkbox selection — same
+// "reject the whole request rather than silently act on a partial set"
+// safety as bulk delete above. Deliberately requires every selected
+// document to already be 'failed' (not just "belongs to this matter"): a
+// client that only ever sends genuinely-failed selected ids never hits
+// this, but a stale/manual request touching an already-ready document
+// would otherwise silently re-run extraction for no reason.
+documentsRouter.post("/retry-ingest", async (req: Request<{ matterId: string }>, res, next) => {
+  try {
+    const { orgId, userId } = req.eddContext!;
+    const { matterId } = req.params;
+    const { documentIds } = req.body as { documentIds?: string[] };
+
+    if (!documentIds || documentIds.length === 0) {
+      res.status(400).json({ error: "documentIds is required and must be non-empty" });
+      return;
+    }
+
+    const rows = await withOrgSession(orgId, (client) =>
+      client.query<{ id: string; ingest_status: string }>(
+        "SELECT id, ingest_status FROM documents WHERE matter_id = $1 AND id = ANY($2::uuid[])",
+        [matterId, documentIds],
+      ),
+    );
+    if (rows.rowCount !== documentIds.length) {
+      res.status(400).json({ error: "One or more documentIds do not belong to this matter" });
+      return;
+    }
+    if (rows.rows.some((r) => r.ingest_status !== "failed")) {
+      res.status(400).json({ error: "One or more documentIds are not currently in a failed state" });
+      return;
+    }
+
+    await withOrgSession(orgId, async (client) => {
+      await client.query(
+        "UPDATE documents SET ingest_status = 'pending', ingest_error = NULL WHERE matter_id = $1 AND id = ANY($2::uuid[])",
+        [matterId, documentIds],
+      );
+      for (const documentId of documentIds) {
+        await recordAuditEvent(client, {
+          orgId,
+          actorUserId: userId,
+          matterId,
+          documentId,
+          action: "document.retry_ingest",
+          description: "Retried failed ingest",
+        });
+      }
+    });
+
+    // Enqueued after the transaction commits, same ordering as
+    // upload-complete above — the worker must never pick up a message
+    // whose 'pending' reset hasn't actually committed yet.
     await Promise.all(
-      s3Keys.map((key) =>
-        s3Client.send(new DeleteObjectCommand({ Bucket: DOCUMENTS_BUCKET, Key: key })).catch((err) => {
-          console.error(`Failed to delete S3 object ${key} for deleted document ${documentId}:`, err);
-        }),
+      documentIds.map((documentId) =>
+        sqsClient.send(new SendMessageCommand({ QueueUrl: INGEST_QUEUE_URL, MessageBody: JSON.stringify({ documentId, orgId }) })),
       ),
     );
 
-    res.status(204).send();
+    res.status(202).json({ retriedCount: documentIds.length });
   } catch (err) {
     next(err);
   }
@@ -252,12 +398,26 @@ documentsRouter.post("/init-upload", async (req: Request<{ matterId: string }>, 
 // document exists and hand it to the worker."
 documentsRouter.post("/:id/upload-complete", async (req: Request<{ matterId: string; id: string }>, res, next) => {
   try {
-    const { orgId } = req.eddContext!;
+    const { orgId, userId } = req.eddContext!;
     const { matterId, id: documentId } = req.params;
 
-    const existing = await withOrgSession(orgId, (client) =>
-      client.query("SELECT id FROM documents WHERE id = $1 AND matter_id = $2", [documentId, matterId]),
-    );
+    const existing = await withOrgSession(orgId, async (client) => {
+      const rows = await client.query<{ original_filename: string }>(
+        "SELECT original_filename FROM documents WHERE id = $1 AND matter_id = $2",
+        [documentId, matterId],
+      );
+      if (rows.rowCount !== 0) {
+        await recordAuditEvent(client, {
+          orgId,
+          actorUserId: userId,
+          matterId,
+          documentId,
+          action: "document.upload",
+          description: `Uploaded file "${rows.rows[0].original_filename}"`,
+        });
+      }
+      return rows;
+    });
     if (existing.rowCount === 0) {
       res.status(404).json({ error: "Document not found" });
       return;

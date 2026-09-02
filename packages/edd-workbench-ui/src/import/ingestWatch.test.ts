@@ -15,11 +15,23 @@ describe("stepIngestWatch", () => {
     expect(result.giveUp).toBe(false);
   });
 
-  it("treats an id absent from the lookup as still-pending (unknown), not terminal", () => {
+  it("treats an id absent from the lookup as ready — a fully successful transparent-container expansion (PST/zip/7z/mbox) deletes its own row, so this is the ONLY way that outcome is ever observable", () => {
     const result = stepIngestWatch(["a"], {}, 1, 40);
-    expect(result.stillPending).toEqual(["a"]);
-    expect(result.readyCount).toBe(0);
+    expect(result.stillPending).toEqual([]);
+    expect(result.readyCount).toBe(1);
     expect(result.failedCount).toBe(0);
+    expect(result.giveUp).toBe(false);
+  });
+
+  it("a mix of a deleted (fully-succeeded container), a real ready row, a real failed row, and a real still-pending row resolves correctly in one step", () => {
+    const result = stepIngestWatch(["deleted-container", "ready-doc", "failed-doc", "pending-doc"], {
+      "ready-doc": "ready",
+      "failed-doc": "failed",
+      "pending-doc": "pending",
+    }, 1, 40);
+    expect(result.readyCount).toBe(2);
+    expect(result.failedCount).toBe(1);
+    expect(result.stillPending).toEqual(["pending-doc"]);
   });
 
   it("gives up exactly at maxAttempts when ids remain pending", () => {

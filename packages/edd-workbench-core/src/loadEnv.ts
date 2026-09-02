@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 // Single source of truth for local-dev env vars (DATABASE_URL, S3/SQS
 // endpoints, Auth0 config, etc.): apps/edd-workbench/server/.env — imported
 // by the server, the worker, and edd-workbench-core's own migrate.ts/
-// seedOrg.ts/setAppPassword.ts scripts alike, since local Postgres/MinIO/
+// setAppPassword.ts scripts alike, since local Postgres/MinIO/
 // ElasticMQ connection details are identical across all of them; there's
 // nothing worker-specific (or script-specific) to configure differently.
 // Loaded via a path computed from this file's own location, not

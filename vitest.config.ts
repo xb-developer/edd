@@ -23,6 +23,8 @@ export default defineConfig({
       SQS_ENDPOINT: "http://localhost:9324",
       EDD_WORKBENCH_INGEST_QUEUE_URL: "http://localhost:9324/queue/edd-workbench-ingest-test",
       EDD_WORKBENCH_EXPORT_QUEUE_URL: "http://localhost:9324/queue/edd-workbench-export-test",
+      EDD_WORKBENCH_OCR_QUEUE_URL: "http://localhost:9324/queue/edd-workbench-ocr-test",
+      EDD_WORKBENCH_EMBEDDING_QUEUE_URL: "http://localhost:9324/queue/edd-workbench-embedding-test",
     },
     testTimeout: 15000,
     // Every test file shares the same real local Postgres/MinIO/ElasticMQ —

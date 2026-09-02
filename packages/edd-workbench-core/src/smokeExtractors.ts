@@ -1,8 +1,13 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import sevenZip from "7zip-min";
 import { extractMsgMetadata } from "./extractors/msg.js";
 import { extractDocContent } from "./extractors/doc.js";
+import { extractSevenZipMembers } from "./extractors/sevenZip.js";
+import { iterateMboxMessages } from "./extractors/mbox.js";
 
 /**
  * Runs outside Vitest, on purpose. Vitest's esbuild-based module loader
@@ -46,6 +51,54 @@ async function run(): Promise<void> {
   }
 
   console.log("smoke-extractors: OK (extractDocContent resolves word-extractor's real constructor under plain Node ESM)");
+
+  // 7zip-min exports each function via a separate `exports.x = ...`
+  // assignment (no `exports.default`), the same shape already confirmed
+  // safe for word-extractor above — checked here anyway under plain tsx,
+  // since sevenZip.ts's own `import sevenZip from "7zip-min"` default
+  // import depends on that shape resolving the same way it does under
+  // Vitest's esbuild loader.
+  const sevenZipWorkDir = await mkdtemp(join(tmpdir(), "smoke-7z-"));
+  try {
+    const srcPath = join(sevenZipWorkDir, "exhibit.txt");
+    await writeFile(srcPath, "smoke-test content");
+    const archivePath = join(sevenZipWorkDir, "archive.7z");
+    await sevenZip.pack(srcPath, archivePath);
+
+    const extractDir = join(sevenZipWorkDir, "extracted");
+    const members = [];
+    for await (const member of extractSevenZipMembers(archivePath, extractDir, 1024 * 1024)) {
+      members.push(member);
+    }
+    if (members.length !== 1 || members[0].content.toString("utf-8") !== "smoke-test content") {
+      throw new Error(`smoke-extractors: expected one real 7z member with "smoke-test content", got ${JSON.stringify(members)}`);
+    }
+  } finally {
+    await rm(sevenZipWorkDir, { recursive: true, force: true });
+  }
+
+  console.log("smoke-extractors: OK (extractSevenZipMembers resolves 7zip-min's real functions under plain Node ESM)");
+
+  // mbox-reader's `mboxReader` is a named CJS export
+  // (`module.exports = { MboxReader, mboxReader }`) — a different shape
+  // again from the two above, checked here for the same reason.
+  const mboxWorkDir = await mkdtemp(join(tmpdir(), "smoke-mbox-"));
+  try {
+    const mboxPath = join(mboxWorkDir, "mailbox.mbox");
+    await writeFile(mboxPath, ["From smoke@example.com Mon Jan 12 09:30:00 2026", "Subject: smoke test", "", "smoke-test body", ""].join("\n"));
+
+    const messages = [];
+    for await (const message of iterateMboxMessages(mboxPath)) {
+      messages.push(message);
+    }
+    if (messages.length !== 1 || !messages[0].toString("utf-8").includes("smoke-test body")) {
+      throw new Error(`smoke-extractors: expected one real mbox message containing "smoke-test body", got ${JSON.stringify(messages.map(String))}`);
+    }
+  } finally {
+    await rm(mboxWorkDir, { recursive: true, force: true });
+  }
+
+  console.log("smoke-extractors: OK (iterateMboxMessages resolves mbox-reader's real mboxReader under plain Node ESM)");
 }
 
 run().catch((err) => {

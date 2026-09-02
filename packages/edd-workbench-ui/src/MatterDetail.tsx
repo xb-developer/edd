@@ -1,19 +1,23 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { DragEvent as ReactDragEvent, PointerEvent as ReactPointerEvent } from "react";
+import type { DragEvent as ReactDragEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import type { ApiClient } from "./api";
 import type { DocumentDTO, TagSetDTO } from "./types";
 import { DocumentViewer } from "./DocumentViewer";
 import { CodingPanel } from "./CodingPanel";
-import { FilterPanel } from "./FilterPanel";
+import { FilterPanel, type IngestStatusFilter } from "./FilterPanel";
 import { DocumentPropertiesPanel } from "./DocumentPropertiesPanel";
 import { useViewerWindow } from "./viewer-window/useViewerWindow";
 import { useDocumentImport } from "./import/useDocumentImport";
-import { formatSize, formatDate } from "./format";
+import { formatSize, formatDate, displayFilename, stripExtension } from "./format";
+import { sortDocuments, type SortableColumn, type SortDirection } from "./sortDocuments";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 export interface MatterDetailProps {
   api: ApiClient;
   matterId: string;
+  /** Admin, or this matter's own creator — gates the access-list panel's add/remove controls (see FilterPanel.tsx). */
+  canManageAccess: boolean;
 }
 
 const INGEST_STATUS_COLORS: Record<DocumentDTO["ingestStatus"], string> = {
@@ -58,7 +62,158 @@ function useDragResize(initial: number, min: number, max: number, axis: "x" | "y
   return { size, dragging, onPointerDown, onPointerMove, onPointerUp: endDrag, onPointerCancel: endDrag };
 }
 
-export function MatterDetail({ api, matterId }: MatterDetailProps) {
+type DocumentColumnKey = "guid" | "familyGuid" | "originalFilename" | "extension" | "sizeBytes" | "docDate" | "tags";
+
+// Preferred widths for every resizable column EXCEPT filename — filename is
+// the one column that absorbs whatever space is actually available (see
+// fitToContainer below), not a fixed preference.
+const PREFERRED_COLUMN_WIDTHS: Omit<Record<DocumentColumnKey, number>, "originalFilename"> = {
+  guid: 80,
+  familyGuid: 80,
+  extension: 55,
+  sizeBytes: 70,
+  docDate: 90,
+  tags: 150,
+};
+
+const MIN_COLUMN_WIDTH = 40;
+// The two non-resizable columns (checkbox, per-row delete) — needed to
+// compute how much width is actually left for the resizable ones.
+const SELECT_CELL_WIDTH = 32;
+const CHECK_CELL_WIDTH = 32;
+
+const DEFAULT_COLUMN_WIDTHS: Record<DocumentColumnKey, number> = { ...PREFERRED_COLUMN_WIDTHS, originalFilename: 220 };
+
+/**
+ * Independent per-column drag-to-resize, same Pointer Capture mechanics as
+ * useDragResize above but keyed by column rather than a single dimension —
+ * one shared drag ref (only one column can be dragged at a time) instead of
+ * instantiating useDragResize once per column, which would mean a fixed,
+ * unrollable number of hook calls for however many columns this table ends
+ * up with.
+ *
+ * Also owns "fit the columns to the panel's actual width" — every other
+ * column keeps its preferred width and the filename column absorbs
+ * whatever's left over (shrinking it if necessary), so the table needs no
+ * horizontal scrollbar on a fresh load regardless of screen size. This
+ * auto-fit re-runs whenever the matter changes or the panel itself is
+ * resized (dragging the left/right panel handles, or the browser window) —
+ * but ONLY until the user manually drags a column's own resize handle, at
+ * which point their explicit choice takes over and a scrollbar is the
+ * expected result of a table now wider than the panel, not something to
+ * silently fight by auto-shrinking things back.
+ */
+function useColumnWidths(matterId: string) {
+  const [widths, setWidths] = useState<Record<DocumentColumnKey, number>>(DEFAULT_COLUMN_WIDTHS);
+  const [draggingColumn, setDraggingColumn] = useState<DocumentColumnKey | null>(null);
+  const dragRef = useRef({ column: null as DocumentColumnKey | null, startX: 0, startWidth: 0 });
+  const manuallyResizedRef = useRef(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  const fitToContainer = useCallback(() => {
+    if (manuallyResizedRef.current) return;
+    const container = containerRef.current;
+    if (!container) return;
+    const preferredTotal = Object.values(PREFERRED_COLUMN_WIDTHS).reduce((sum, w) => sum + w, 0);
+    // -2px slack against border/rounding so fitting exactly never itself
+    // triggers a 1px scrollbar sliver.
+    const available = container.clientWidth - SELECT_CELL_WIDTH - CHECK_CELL_WIDTH - preferredTotal - 2;
+    setWidths({ ...PREFERRED_COLUMN_WIDTHS, originalFilename: Math.max(MIN_COLUMN_WIDTH, available) });
+  }, []);
+
+  // Layout effect, not a plain effect — this measures and sets widths that
+  // affect visible layout immediately; running before the browser's first
+  // paint of the new matter avoids a brief flash of the previous/default
+  // widths before snapping to the fitted ones.
+  useLayoutEffect(() => {
+    manuallyResizedRef.current = false;
+    fitToContainer();
+  }, [matterId, fitToContainer]);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const observer = new ResizeObserver(fitToContainer);
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, [fitToContainer]);
+
+  function startResize(column: DocumentColumnKey) {
+    return (e: ReactPointerEvent<HTMLDivElement>) => {
+      // Otherwise a plain click-without-drag on the handle would bubble up
+      // and toggle sort on the SortableTh it sits inside.
+      e.stopPropagation();
+      e.currentTarget.setPointerCapture(e.pointerId);
+      manuallyResizedRef.current = true;
+      dragRef.current = { column, startX: e.clientX, startWidth: widths[column] };
+      setDraggingColumn(column);
+    };
+  }
+  function onMove(e: ReactPointerEvent<HTMLDivElement>) {
+    const drag = dragRef.current;
+    if (!drag.column) return;
+    const next = Math.max(MIN_COLUMN_WIDTH, drag.startWidth + (e.clientX - drag.startX));
+    setWidths((prev) => ({ ...prev, [drag.column!]: next }));
+  }
+  function endResize(e: ReactPointerEvent<HTMLDivElement>) {
+    dragRef.current.column = null;
+    setDraggingColumn(null);
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+  }
+
+  return { widths, draggingColumn, startResize, onMove, endResize, containerRef };
+}
+
+interface ColumnResizeHandleProps {
+  column: DocumentColumnKey;
+  columnWidths: ReturnType<typeof useColumnWidths>;
+}
+
+function ColumnResizeHandle({ column, columnWidths }: ColumnResizeHandleProps) {
+  return (
+    <div
+      className={`col-resize-th-handle${columnWidths.draggingColumn === column ? " dragging" : ""}`}
+      onClick={(e) => e.stopPropagation()}
+      onPointerDown={columnWidths.startResize(column)}
+      onPointerMove={columnWidths.onMove}
+      onPointerUp={columnWidths.endResize}
+      onPointerCancel={columnWidths.endResize}
+    />
+  );
+}
+
+interface SortableThProps {
+  column: SortableColumn;
+  sortColumn: SortableColumn | null;
+  sortDirection: SortDirection;
+  onSort: (column: SortableColumn) => void;
+  resizeHandle: ReactNode;
+  children: ReactNode;
+}
+
+/**
+ * A clickable `<th>` that toggles ascending/descending sort on its own
+ * column. Every `<th>` in this table already gets `cursor: pointer` from
+ * table.reg's own base styles.css rule, and a `.sorted` class is already
+ * styled there too (`color: var(--navy)`) — both clearly prepared for
+ * this exact feature already, just never wired up to real behavior until
+ * now, so this reuses that existing class rather than inventing a new one.
+ */
+function SortableTh({ column, sortColumn, sortDirection, onSort, resizeHandle, children }: SortableThProps) {
+  const active = sortColumn === column;
+  return (
+    <th
+      className={active ? "sorted" : undefined}
+      onClick={() => onSort(column)}
+      aria-sort={active ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}
+    >
+      {children}
+      {active ? (sortDirection === "asc" ? " ▲" : " ▼") : null}
+      {resizeHandle}
+    </th>
+  );
+}
+
+export function MatterDetail({ api, matterId, canManageAccess }: MatterDetailProps) {
   const [documents, setDocuments] = useState<DocumentDTO[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
@@ -95,12 +250,25 @@ export function MatterDetail({ api, matterId }: MatterDetailProps) {
   const [tagSets, setTagSets] = useState<TagSetDTO[]>([]);
   const [appliedTagsByDocument, setAppliedTagsByDocument] = useState<Record<string, string[]>>({});
   const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<IngestStatusFilter>("all");
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [tagMatchMode, setTagMatchMode] = useState<"all" | "any">("all");
+  const [sortColumn, setSortColumn] = useState<SortableColumn | null>(null);
+  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
+
+  function toggleSort(column: SortableColumn) {
+    if (sortColumn !== column) {
+      setSortColumn(column);
+      setSortDirection("asc");
+      return;
+    }
+    setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
+  }
 
   const leftResize = useDragResize(230, 160, 400, "x", 1);
   const rightResize = useDragResize(420, 320, 720, "x", -1);
   const rowResize = useDragResize(420, 120, 900, "y", 1);
+  const columnWidths = useColumnWidths(matterId);
 
   function refreshDocuments() {
     api.getMatterDocuments(matterId).then(setDocuments).catch((err) => setError(err.message));
@@ -142,10 +310,27 @@ export function MatterDetail({ api, matterId }: MatterDetailProps) {
     }
   }
 
+  const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
+
+  async function handleBulkDelete() {
+    setShowBulkDeleteConfirm(false);
+    try {
+      const idsToDelete = Array.from(checkedDocumentIds);
+      await api.bulkDeleteDocuments(matterId, idsToDelete);
+      if (selectedDocumentId && checkedDocumentIds.has(selectedDocumentId)) setSelectedDocumentId(null);
+      setCheckedDocumentIds(new Set());
+      refreshDocuments();
+      refreshTagState();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
   const filteredDocuments =
     documents?.filter((doc) => {
       const matchesSearch = searchQuery.trim().length === 0 || doc.originalFilename.toLowerCase().includes(searchQuery.trim().toLowerCase());
       if (!matchesSearch) return false;
+      if (statusFilter !== "all" && doc.ingestStatus !== statusFilter) return false;
       if (selectedTagIds.length === 0) return true;
       const appliedIds = appliedTagsByDocument[doc.documentId] ?? [];
       return tagMatchMode === "all" ? selectedTagIds.every((id) => appliedIds.includes(id)) : selectedTagIds.some((id) => appliedIds.includes(id));
@@ -153,20 +338,29 @@ export function MatterDetail({ api, matterId }: MatterDetailProps) {
 
   const visibleCheckedCount = filteredDocuments?.filter((d) => checkedDocumentIds.has(d.documentId)).length ?? 0;
   const hiddenCheckedCount = checkedDocumentIds.size - visibleCheckedCount;
+  // Sum over the FILTERED set (the current working view), not the whole
+  // matter — matches what "FILTERED" already narrows the table to.
+  const totalFilteredSizeBytes = filteredDocuments?.reduce((sum, d) => sum + d.sizeBytes, 0) ?? 0;
 
-  const selectedDocument = filteredDocuments?.find((d) => d.documentId === selectedDocumentId) ?? null;
-  const selectedIndex = filteredDocuments?.findIndex((d) => d.documentId === selectedDocumentId) ?? -1;
+  // Same elements as filteredDocuments, just reordered — used for
+  // everything render/navigation-facing below so Prev/Next and the table's
+  // own row order both match whatever the reviewer actually sees after a
+  // column-header sort, not the underlying filtered-but-unsorted order.
+  const sortedDocuments = filteredDocuments && sortColumn ? sortDocuments(filteredDocuments, sortColumn, sortDirection) : filteredDocuments;
+
+  const selectedDocument = sortedDocuments?.find((d) => d.documentId === selectedDocumentId) ?? null;
+  const selectedIndex = sortedDocuments?.findIndex((d) => d.documentId === selectedDocumentId) ?? -1;
   // Walks the *filtered/displayed* list, not the full matter — matches what
   // the reviewer is actually looking at. Server-ordered by guid_number (see
   // documents.ts's list route) and unpaginated for now; once Milestone 3
   // adds pagination this needs to walk the displayed page's order instead,
   // same caveat as before, now doubly true with client-side filtering too.
   const goToPrev = () => {
-    if (filteredDocuments && selectedIndex > 0) setSelectedDocumentId(filteredDocuments[selectedIndex - 1].documentId);
+    if (sortedDocuments && selectedIndex > 0) setSelectedDocumentId(sortedDocuments[selectedIndex - 1].documentId);
   };
   const goToNext = () => {
-    if (filteredDocuments && selectedIndex >= 0 && selectedIndex < filteredDocuments.length - 1) {
-      setSelectedDocumentId(filteredDocuments[selectedIndex + 1].documentId);
+    if (sortedDocuments && selectedIndex >= 0 && selectedIndex < sortedDocuments.length - 1) {
+      setSelectedDocumentId(sortedDocuments[selectedIndex + 1].documentId);
     }
   };
 
@@ -197,7 +391,18 @@ export function MatterDetail({ api, matterId }: MatterDetailProps) {
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
+    // width:100%/minWidth:0 — this div is the sole child of the OUTER
+    // main.layout (EddWorkbenchWorkspace.tsx), a row-direction flex
+    // container. With no flex-grow and no explicit width, this div's width
+    // was purely content-driven: narrow when the table has no rows to show
+    // (the whole 3-column layout shrinks, pulling the right panel in from
+    // the screen edge), and — the opposite problem — unbounded when a
+    // resized table wants to be very wide (nothing here anchors it to the
+    // viewport, so the resized table pushes the whole layout wider instead
+    // of scrolling internally within .table-wrap). A definite width here is
+    // what makes every downstream overflow/containment rule (col-center's
+    // own overflow:hidden, .table-wrap's overflow:auto) behave as intended.
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", width: "100%", minWidth: 0, minHeight: 0 }}>
       {error && (
         <div className="import-failures-banner">
           <div className="import-failures-head">
@@ -268,7 +473,7 @@ export function MatterDetail({ api, matterId }: MatterDetailProps) {
         </div>
       )}
 
-      {!documents || !filteredDocuments ? (
+      {!documents || !filteredDocuments || !sortedDocuments ? (
         <p className="empty-note" style={{ padding: 16 }}>
           Loading…
         </p>
@@ -277,6 +482,7 @@ export function MatterDetail({ api, matterId }: MatterDetailProps) {
           <FilterPanel
             api={api}
             matterId={matterId}
+            canManageAccess={canManageAccess}
             style={{ flexBasis: leftResize.size }}
             tagSets={tagSets}
             appliedTagsByDocument={appliedTagsByDocument}
@@ -288,6 +494,10 @@ export function MatterDetail({ api, matterId }: MatterDetailProps) {
             onMatchModeChange={setTagMatchMode}
             onClearTagFilter={() => setSelectedTagIds([])}
             selectedDocumentIds={Array.from(checkedDocumentIds)}
+            documents={documents}
+            statusFilter={statusFilter}
+            onStatusFilterChange={setStatusFilter}
+            onDocumentsChanged={refreshDocuments}
           />
 
           <div className={`col-resize-handle${leftResize.dragging ? " dragging" : ""}`} {...leftResize} />
@@ -295,14 +505,22 @@ export function MatterDetail({ api, matterId }: MatterDetailProps) {
           <section className="col col-center">
             <div className="table-toolbar">
               <span className="count">
-                {filteredDocuments.length} of {documents.length} document{documents.length === 1 ? "" : "s"}
+                DOCUMENTS {documents.length} FILTERED {filteredDocuments.length} CHECKED {checkedDocumentIds.size} SIZE{" "}
+                {formatSize(totalFilteredSizeBytes)}
               </span>
               {checkedDocumentIds.size > 0 && (
                 <span className="count">
-                  {visibleCheckedCount} selected
-                  {hiddenCheckedCount > 0 ? ` (${hiddenCheckedCount} not shown by current filter)` : ""}
+                  {hiddenCheckedCount > 0 ? `${hiddenCheckedCount} not shown by current filter` : null}
                   <button type="button" className="clear-filters" onClick={() => setCheckedDocumentIds(new Set())}>
                     Clear
+                  </button>
+                  <button
+                    type="button"
+                    className="pop-out-btn"
+                    style={{ borderColor: "var(--seal)", color: "var(--seal)" }}
+                    onClick={() => setShowBulkDeleteConfirm(true)}
+                  >
+                    Delete {checkedDocumentIds.size}
                   </button>
                 </span>
               )}
@@ -325,7 +543,13 @@ export function MatterDetail({ api, matterId }: MatterDetailProps) {
               />
               <span className="drop-hint">Drag files here to import</span>
             </div>
-            <div className={`table-wrap${dragOver ? " drag-over" : ""}`} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
+            <div
+              className={`table-wrap${dragOver ? " drag-over" : ""}`}
+              ref={columnWidths.containerRef}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+            >
               {filteredDocuments.length === 0 ? (
                 <div className="empty-state">
                   <div className="glyph">000000</div>
@@ -337,21 +561,38 @@ export function MatterDetail({ api, matterId }: MatterDetailProps) {
                   </p>
                 </div>
               ) : (
-                <table className="reg">
+                // An explicit computed width, not just table-layout:fixed's
+                // own "auto width = sum of columns" spec behavior — that
+                // turned out not to reliably grow the table past 100% in
+                // practice (browsers appear to treat the CSS min-width:100%
+                // floor below as the effective basis and redistribute
+                // column proportions to still fit it, rather than letting
+                // the table actually grow). An unambiguous pixel width here
+                // removes that guesswork: once the columns' real sum
+                // exceeds the panel, this is bigger than 100%, and
+                // .table-wrap's overflow-x:auto has something concrete to
+                // scroll. min-width:100% (styles.css) still applies on top
+                // of this so the table never looks narrower than the panel
+                // either, if this computed value ever comes in a hair short.
+                <table
+                  className="reg"
+                  style={{
+                    width:
+                      SELECT_CELL_WIDTH +
+                      CHECK_CELL_WIDTH +
+                      Object.values(columnWidths.widths).reduce((sum, w) => sum + w, 0),
+                  }}
+                >
                   <colgroup>
-                    <col style={{ width: 32 }} />
-                    <col style={{ width: 80 }} />
-                    <col style={{ width: 80 }} />
-                    <col />
-                    <col style={{ width: 55 }} />
-                    <col style={{ width: 70 }} />
-                    <col style={{ width: 90 }} />
-                    <col style={{ width: 90 }} />
-                    <col style={{ width: 120 }} />
-                    <col style={{ width: 120 }} />
-                    <col style={{ width: 100 }} />
-                    <col style={{ width: 150 }} />
-                    <col style={{ width: 32 }} />
+                    <col style={{ width: SELECT_CELL_WIDTH }} />
+                    <col style={{ width: columnWidths.widths.guid }} />
+                    <col style={{ width: columnWidths.widths.familyGuid }} />
+                    <col style={{ width: columnWidths.widths.originalFilename }} />
+                    <col style={{ width: columnWidths.widths.extension }} />
+                    <col style={{ width: columnWidths.widths.sizeBytes }} />
+                    <col style={{ width: columnWidths.widths.docDate }} />
+                    <col style={{ width: columnWidths.widths.tags }} />
+                    <col style={{ width: CHECK_CELL_WIDTH }} />
                   </colgroup>
                   <thead>
                     <tr>
@@ -370,31 +611,90 @@ export function MatterDetail({ api, matterId }: MatterDetailProps) {
                           aria-label="Select all"
                         />
                       </th>
-                      <th>GUID</th>
-                      <th>Family GUID</th>
-                      <th>Filename</th>
-                      <th>Type</th>
-                      <th>Size</th>
-                      <th>Date</th>
-                      <th>Date Modified</th>
-                      <th>Author</th>
-                      <th>To</th>
-                      <th>Cc</th>
-                      <th>Tags</th>
+                      <SortableTh
+                        column="guid"
+                        sortColumn={sortColumn}
+                        sortDirection={sortDirection}
+                        onSort={toggleSort}
+                        resizeHandle={<ColumnResizeHandle column="guid" columnWidths={columnWidths} />}
+                      >
+                        GUID
+                      </SortableTh>
+                      <SortableTh
+                        column="familyGuid"
+                        sortColumn={sortColumn}
+                        sortDirection={sortDirection}
+                        onSort={toggleSort}
+                        resizeHandle={<ColumnResizeHandle column="familyGuid" columnWidths={columnWidths} />}
+                      >
+                        Family GUID
+                      </SortableTh>
+                      <SortableTh
+                        column="originalFilename"
+                        sortColumn={sortColumn}
+                        sortDirection={sortDirection}
+                        onSort={toggleSort}
+                        resizeHandle={<ColumnResizeHandle column="originalFilename" columnWidths={columnWidths} />}
+                      >
+                        Filename
+                      </SortableTh>
+                      <SortableTh
+                        column="extension"
+                        sortColumn={sortColumn}
+                        sortDirection={sortDirection}
+                        onSort={toggleSort}
+                        resizeHandle={<ColumnResizeHandle column="extension" columnWidths={columnWidths} />}
+                      >
+                        Type
+                      </SortableTh>
+                      <SortableTh
+                        column="sizeBytes"
+                        sortColumn={sortColumn}
+                        sortDirection={sortDirection}
+                        onSort={toggleSort}
+                        resizeHandle={<ColumnResizeHandle column="sizeBytes" columnWidths={columnWidths} />}
+                      >
+                        Size
+                      </SortableTh>
+                      <SortableTh
+                        column="docDate"
+                        sortColumn={sortColumn}
+                        sortDirection={sortDirection}
+                        onSort={toggleSort}
+                        resizeHandle={<ColumnResizeHandle column="docDate" columnWidths={columnWidths} />}
+                      >
+                        Date
+                      </SortableTh>
+                      {/* No inline position here — table.reg thead th already sets
+                          position:sticky, which (like any non-static position)
+                          already establishes the containing block the resize
+                          handle anchors against; overriding it would break this
+                          header's sticky-on-scroll behavior. */}
+                      <th>
+                        Tags
+                        <ColumnResizeHandle column="tags" columnWidths={columnWidths} />
+                      </th>
                       <th className="checkcell"></th>
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredDocuments.map((doc) => {
-                      const metadata = (doc.metadata ?? {}) as Record<string, unknown>;
-                      const to = typeof metadata.to === "string" ? metadata.to : null;
-                      const cc = typeof metadata.cc === "string" ? metadata.cc : null;
+                    {sortedDocuments.map((doc) => {
                       const appliedTagIds = appliedTagsByDocument[doc.documentId] ?? [];
                       return (
                         <tr
                           key={doc.documentId}
                           className={doc.documentId === selectedDocumentId ? "active" : ""}
-                          onClick={() => setSelectedDocumentId(doc.documentId)}
+                          onClick={() => {
+                            setSelectedDocumentId(doc.documentId);
+                            // Clicking anywhere in the main window naturally
+                            // gives it focus, which would drop an open
+                            // pop-out behind it — hand focus straight back,
+                            // including for re-selecting the row that's
+                            // already selected (which wouldn't otherwise
+                            // trigger the selectedDocumentId-change effect
+                            // that also does this).
+                            viewerWindow.focusPopout();
+                          }}
                         >
                           <td className="selectcell" onClick={(e) => e.stopPropagation()}>
                             <input
@@ -412,15 +712,11 @@ export function MatterDetail({ api, matterId }: MatterDetailProps) {
                             style={doc.depth > 0 ? { paddingLeft: 10 + doc.depth * 16 } : undefined}
                           >
                             {doc.depth > 0 && <span className="muted">↳ </span>}
-                            {doc.originalFilename}
+                            {stripExtension(displayFilename(doc), doc.extension)}
                           </td>
                           <td className="muted">{doc.extension}</td>
                           <td className="muted">{formatSize(doc.sizeBytes)}</td>
                           <td className="muted">{formatDate(doc.docDate)}</td>
-                          <td className="muted">{formatDate(doc.fileModifiedAt)}</td>
-                          <td className="muted">{doc.author ?? "—"}</td>
-                          <td className="muted">{to ?? "—"}</td>
-                          <td className="muted">{cc ?? "—"}</td>
                           <td>
                             <div className="tagchips">
                               <span
@@ -472,16 +768,13 @@ export function MatterDetail({ api, matterId }: MatterDetailProps) {
               <div className="pane-title-row">
                 <h2 className="panel-title">Preview</h2>
                 {viewerWindow.state === "docked" ? (
-                  <>
-                    {viewerWindow.pipSupported && (
-                      <button type="button" className="pop-out-btn" onClick={viewerWindow.popOutPiP}>
-                        ⧉ Float on top
-                      </button>
-                    )}
-                    <button type="button" className="pop-out-btn" onClick={() => viewerWindow.popOut(selectedDocument.documentId)}>
-                      ⧉ Pop out
-                    </button>
-                  </>
+                  // "Float on top" (PiP) button removed from the UI — the
+                  // underlying popOutPiP/pipSupported functionality in
+                  // useViewerWindow is untouched, just unreachable from here
+                  // for now, so restoring the button is a one-line revert.
+                  <button type="button" className="pop-out-btn" onClick={() => viewerWindow.popOut(selectedDocument.documentId)}>
+                    ⧉ Pop out
+                  </button>
                 ) : (
                   <button type="button" className="pop-out-btn" onClick={viewerWindow.dockBack}>
                     Dock back
@@ -533,12 +826,21 @@ export function MatterDetail({ api, matterId }: MatterDetailProps) {
                   onPrev={goToPrev}
                   onNext={goToNext}
                   canGoPrev={selectedIndex > 0}
-                  canGoNext={selectedIndex >= 0 && selectedIndex < filteredDocuments.length - 1}
+                  canGoNext={selectedIndex >= 0 && selectedIndex < sortedDocuments.length - 1}
                 />
               </>
             )}
           </section>
         </main>
+      )}
+      {showBulkDeleteConfirm && (
+        <ConfirmDialog
+          title="Delete selected documents?"
+          message={`Delete ${checkedDocumentIds.size} document${checkedDocumentIds.size === 1 ? "" : "s"}? Any of their own attachments will be deleted too. This cannot be undone.`}
+          confirmLabel="Delete"
+          onConfirm={handleBulkDelete}
+          onCancel={() => setShowBulkDeleteConfirm(false)}
+        />
       )}
     </div>
   );

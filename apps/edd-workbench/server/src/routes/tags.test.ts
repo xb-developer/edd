@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import express from "express";
 import request from "supertest";
-import { Client } from "pg";
 import { afterAll, describe, expect, it } from "vitest";
 import { pool, withOrgSession, initMatterGuidCounter } from "@xbundle/edd-workbench-core";
 import { tagsRouter } from "./tags.js";
@@ -30,10 +29,10 @@ function buildTestApp(eddContext: EddRequestContext) {
 }
 
 async function deleteTestOrg(orgId: string): Promise<void> {
-  const client = new Client({ connectionString: "postgres://postgres:postgres@localhost:5432/edd_workbench_test" });
-  await client.connect();
-  await client.query("DELETE FROM organizations WHERE id = $1", [orgId]);
-  await client.end();
+  await withOrgSession(orgId, async (client) => {
+    await client.query("DELETE FROM audit_log WHERE org_id = $1", [orgId]);
+    await client.query("DELETE FROM matters WHERE org_id = $1", [orgId]);
+  });
 }
 
 // Mirrors matters.ts's own POST / handler's tag-set seeding exactly, since
@@ -42,18 +41,10 @@ async function deleteTestOrg(orgId: string): Promise<void> {
 // and a test matter created here wouldn't, which would make every
 // assertion below test something that can't happen in production.
 async function createTestOrgAndMatter(namePrefix: string) {
-  const orgId = randomUUID();
-  await pool.query("INSERT INTO organizations (id, name, auth0_org_id) VALUES ($1, $2, $3)", [
-    orgId,
-    `${namePrefix} test org`,
-    `test-org-${orgId}`,
-  ]);
+  const orgId = `org_test_${randomUUID()}`;
+  const userId = `auth0|${randomUUID()}`;
 
   return withOrgSession(orgId, async (client) => {
-    const userRow = await client.query<{ id: string }>(
-      "INSERT INTO users (auth0_user_id, email) VALUES ($1, $2) RETURNING id",
-      [`auth0|${randomUUID()}`, "tester@example.com"],
-    );
     const matterRow = await client.query<{ id: string }>("INSERT INTO matters (org_id, name) VALUES ($1, $2) RETURNING id", [
       orgId,
       `${namePrefix} test matter`,
@@ -79,7 +70,7 @@ async function createTestOrgAndMatter(namePrefix: string) {
       [orgId, matterRow.rows[0].id, review.rows[0].id],
     );
 
-    return { orgId, matterId: matterRow.rows[0].id, userId: userRow.rows[0].id };
+    return { orgId, matterId: matterRow.rows[0].id, userId };
   });
 }
 
@@ -142,24 +133,16 @@ describe("tags router", () => {
   });
 
   it("a custom tag created in matter A is invisible from matter B in the same org", async () => {
-    const orgId = randomUUID();
-    await pool.query("INSERT INTO organizations (id, name, auth0_org_id) VALUES ($1, $2, $3)", [
-      orgId,
-      "tags-cross-matter test org",
-      `test-org-${orgId}`,
-    ]);
+    const orgId = `org_test_${randomUUID()}`;
+    const userId = `auth0|${randomUUID()}`;
     try {
-      const { matterId: matterA, userId } = await withOrgSession(orgId, async (client) => {
-        const userRow = await client.query<{ id: string }>("INSERT INTO users (auth0_user_id, email) VALUES ($1, $2) RETURNING id", [
-          `auth0|${randomUUID()}`,
-          "tester@example.com",
-        ]);
+      const { matterId: matterA } = await withOrgSession(orgId, async (client) => {
         const matterRow = await client.query<{ id: string }>("INSERT INTO matters (org_id, name) VALUES ($1, $2) RETURNING id", [
           orgId,
           "matter A",
         ]);
         await initMatterGuidCounter(client, matterRow.rows[0].id);
-        return { matterId: matterRow.rows[0].id, userId: userRow.rows[0].id };
+        return { matterId: matterRow.rows[0].id };
       });
       const matterB = await withOrgSession(orgId, async (client) => {
         const matterRow = await client.query<{ id: string }>("INSERT INTO matters (org_id, name) VALUES ($1, $2) RETURNING id", [

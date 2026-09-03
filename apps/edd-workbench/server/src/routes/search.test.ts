@@ -55,7 +55,7 @@ describe("searchRouter", () => {
     expect(response.status).toBe(200);
     expect(response.body).toEqual({ documentIds: ["doc-1", "doc-2"], totalHits: 2 });
     const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
-    expect(body.query.bool.filter).toEqual([{ term: { org_id: orgId } }, { term: { matter_id: matterId } }]);
+    expect(body.query.bool.filter).toEqual([{ term: { "org_id.keyword": orgId } }, { term: { "matter_id.keyword": matterId } }]);
   });
 
   it("503s with a clear message when Elasticsearch is unreachable", async () => {

@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { randomUUID } from "node:crypto";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { indexDocument, deleteDocumentFromIndex, searchDocuments, getIndexHealth } from "./searchClient.js";
 
 const DOC = {
@@ -76,7 +77,10 @@ describe("searchClient", () => {
 
     expect(result).toEqual({ documentIds: ["doc-1", "doc-2"], totalHits: 42 });
     const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
-    expect(body.query.bool.filter).toEqual([{ term: { org_id: "org-1" } }, { term: { matter_id: "matter-1" } }]);
+    expect(body.query.bool.filter).toEqual([
+      { term: { "org_id.keyword": "org-1" } },
+      { term: { "matter_id.keyword": "matter-1" } },
+    ]);
     expect(body.query.bool.must[0].simple_query_string).toEqual({
       query: "invoice payment",
       fields: ["body", "filename"],
@@ -99,6 +103,60 @@ describe("searchClient", () => {
 
     await expect(getIndexHealth("org-1")).resolves.toEqual({ docCount: 1234 });
     const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
-    expect(body).toEqual({ query: { term: { org_id: "org-1" } } });
+    expect(body).toEqual({ query: { term: { "org_id.keyword": "org-1" } } });
+  });
+});
+
+// Real Elasticsearch, no mocking (vitest.config.ts's own default
+// ELASTICSEARCH_SERVICE_URL, not overridden here) — this is the round trip
+// the mocked tests above cannot verify: that indexing a document and then
+// searching for it by org/matter actually finds it against a REAL cluster
+// with REAL dynamic field mapping. Realistic org_id ("org_" + random hex,
+// underscore) and matter_id (a real UUID, hyphens) deliberately, not
+// "org-1"/"matter-1" — those plain mocked-test ids happen to tokenize as a
+// single word under the standard analyzer, which would have silently
+// hidden the exact bug this suite exists to catch (a `term` filter on the
+// bare, analyzed field name never matches org/matter ids shaped like
+// production's real ones).
+describe("searchClient (real Elasticsearch)", () => {
+  // The sibling describe above deletes ELASTICSEARCH_SERVICE_URL in its own
+  // afterEach (each of its tests re-sets its own mocked value, so it's
+  // self-healing there) — restore vitest.config.ts's real default here too,
+  // since this describe relies on it and runs after that one in file order.
+  beforeEach(() => {
+    process.env.ELASTICSEARCH_SERVICE_URL = "http://localhost:9200";
+  });
+
+  it("finds a real indexed document via searchDocuments, scoped to its real org_id/matter_id", async () => {
+    const orgId = `org_${randomUUID().replace(/-/g, "")}`;
+    const matterId = randomUUID();
+    const documentId = randomUUID();
+
+    await indexDocument({
+      documentId,
+      orgId,
+      matterId,
+      filename: "real-es-roundtrip.pdf",
+      extension: "pdf",
+      guid: "000001",
+      body: "a genuinely unique searchable phrase zzqxvroundtrip",
+    });
+    try {
+      // Newly indexed docs aren't visible to _search until the next refresh
+      // cycle (unlike a GET by _id, which is realtime) — force it rather
+      // than racing the default ~1s interval.
+      await fetch(`${process.env.ELASTICSEARCH_SERVICE_URL}/edd-workbench-documents/_refresh`, { method: "POST" });
+
+      const result = await searchDocuments(orgId, matterId, "zzqxvroundtrip");
+      expect(result.documentIds).toEqual([documentId]);
+      expect(result.totalHits).toBe(1);
+
+      // A different, real matter_id must never see another matter's
+      // document — the whole point of scoping the filter at all.
+      const otherMatter = await searchDocuments(orgId, randomUUID(), "zzqxvroundtrip");
+      expect(otherMatter.documentIds).toEqual([]);
+    } finally {
+      await deleteDocumentFromIndex(documentId);
+    }
   });
 });

@@ -68,6 +68,20 @@ export interface SearchResult {
  * Postgres does, so a second org_id filter is free defense-in-depth against
  * a future bug in this query or a future caller that skips that gate.
  *
+ * Filters against `org_id.keyword`/`matter_id.keyword`, NOT the bare field
+ * names — no explicit index mapping is created anywhere (indexDocument just
+ * PUTs a plain JSON doc), so Elasticsearch's default dynamic mapping gives
+ * every string field `type: text` (analyzed) plus an auto-generated
+ * `.keyword` sub-field (exact match, unanalyzed). A `term` query against
+ * the bare `org_id`/`matter_id` field name matches against the ANALYZED
+ * text — the standard analyzer lowercases and splits on non-letter
+ * characters, so a UUID's hyphens or an "org_..." id's underscore mean the
+ * indexed tokens never equal the whole original string, and the filter
+ * always excludes every real document. Confirmed live: `match_all` found
+ * real indexed docs, but this exact filter shape returned zero for a real
+ * org/matter pair with real documents in it — a term query needs the
+ * `.keyword` sub-field for this to ever match anything.
+ *
  * simple_query_string (not the stricter query_string) never throws on
  * malformed input — it does best-effort parsing of +/-/|/"phrase"/*
  * syntax, which is the boolean/phrase-exact behavior asked for without any
@@ -89,7 +103,7 @@ export async function searchDocuments(orgId: string, matterId: string, query: st
     body: JSON.stringify({
       query: {
         bool: {
-          filter: [{ term: { org_id: orgId } }, { term: { matter_id: matterId } }],
+          filter: [{ term: { "org_id.keyword": orgId } }, { term: { "matter_id.keyword": matterId } }],
           must: [{ simple_query_string: { query, fields: ["body", "filename"], default_operator: "OR" } }],
         },
       },
@@ -107,12 +121,12 @@ export async function searchDocuments(orgId: string, matterId: string, query: st
   return { documentIds: hits.hits.map((h) => h._id), totalHits: hits.total.value };
 }
 
-/** Live document count in the index for one org — the basis for the admin-visible health check (compares this against that org's own Postgres ready/failed document count). Scoped, not a whole-index total, since an admin cares about their own org's data being fully indexed, not some other org's. */
+/** Live document count in the index for one org — the basis for the admin-visible health check (compares this against that org's own Postgres ready/failed document count). Scoped, not a whole-index total, since an admin cares about their own org's data being fully indexed, not some other org's. Filters on `org_id.keyword` — see searchDocuments's own comment for why the bare (dynamically-mapped, analyzed) field name would never match. */
 export async function getIndexHealth(orgId: string): Promise<{ docCount: number }> {
   const res = await fetch(`${serviceUrl()}/${INDEX_NAME}/_count`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query: { term: { org_id: orgId } } }),
+    body: JSON.stringify({ query: { term: { "org_id.keyword": orgId } } }),
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");

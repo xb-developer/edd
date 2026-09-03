@@ -60,6 +60,27 @@ async function createDocumentWithChunk(orgId: string, matterId: string, guidNumb
   });
 }
 
+async function createDocumentWithChunkAndParent(
+  orgId: string,
+  matterId: string,
+  guidNumber: number,
+  filename: string,
+  embedding: number[],
+  parentDocumentId: string,
+  familyDocumentId: string,
+) {
+  return withOrgSession(orgId, async (client) => {
+    const documentId = randomUUID();
+    await client.query(
+      `INSERT INTO documents (id, org_id, matter_id, parent_document_id, family_document_id, depth, guid_number, original_filename, extension, size_bytes, s3_key, content_type_detected, ingest_status)
+       VALUES ($1, $2, $3, $4, $5, 1, $6, $7, 'txt', 100, 'tenants/test/x/original.txt', 'text', 'ready')`,
+      [documentId, orgId, matterId, parentDocumentId, familyDocumentId, guidNumber, filename],
+    );
+    await replaceDocumentChunks(client, { orgId, matterId, documentId, chunks: [{ text: "chunk text", embedding }] });
+    return documentId;
+  });
+}
+
 async function createTestMatter(orgId: string, name: string): Promise<string> {
   return withOrgSession(orgId, async (client) => {
     const matterRow = await client.query<{ id: string }>("INSERT INTO matters (org_id, name) VALUES ($1, $2) RETURNING id", [orgId, name]);
@@ -127,6 +148,31 @@ describe("askRouter", () => {
     expect(response.status).toBe(200);
     expect(response.body.answer).toBe("This is a grounded answer.");
     expect(response.body.relevantDocuments).toEqual([{ documentId: relevantDocId, guid: "000001", filename: "relevant.txt" }]);
+  });
+
+  it("cites the tree-position-derived display guid, not the raw insertion-order guid_number, for a nested attachment's later sibling", async () => {
+    const orgId = `org_test_${randomUUID()}`;
+    orgIdsToClean.push(orgId);
+    const matterId = await createTestMatter(orgId, "ask-tree-order test matter");
+
+    // Same shape as documents.test.ts's tree-reordering case: root (raw 1),
+    // nested.eml (raw 2, child of root), sibling.pdf (raw 3, child of
+    // root) — but nested.eml's own attachment (raw 4) is inserted last,
+    // once it's pulled off its own SQS message, and belongs ahead of
+    // sibling.pdf in tree order. So sibling.pdf's raw guid_number (3) is
+    // NOT its display guid (4) — this is exactly what MATTER_DOCUMENT_TREE_CTE
+    // recomputes, and what ask.ts must also reflect.
+    const rootId = await createDocumentWithChunk(orgId, matterId, 1, "root.eml", oneHot(1));
+    const nestedEmailId = await createDocumentWithChunkAndParent(orgId, matterId, 2, "nested.eml", oneHot(1), rootId, rootId);
+    const siblingId = await createDocumentWithChunkAndParent(orgId, matterId, 3, "sibling.pdf", oneHot(0), rootId, rootId);
+    await createDocumentWithChunkAndParent(orgId, matterId, 4, "nested-attachment.pdf", oneHot(1), nestedEmailId, rootId);
+
+    stubGpuFetch();
+    const app = buildTestApp({ orgId, userId: `auth0|${randomUUID()}`, role: "reviewer", email: "tester@example.com" });
+    const response = await request(app).post(`/api/matters/${matterId}/ask`).send({ question: "What happened?" });
+
+    expect(response.status).toBe(200);
+    expect(response.body.relevantDocuments).toEqual([{ documentId: siblingId, guid: "000004", filename: "sibling.pdf" }]);
   });
 
   it("records the ask (question-embedding) and summarization (answer-generation) token usage against the caller", async () => {

@@ -1,5 +1,13 @@
 import { Router, type Request } from "express";
-import { withOrgSession, embedTexts, generateAnswer, formatGuid, toVectorLiteral, recordAiUsage } from "@xbundle/edd-workbench-core";
+import {
+  withOrgSession,
+  embedTexts,
+  generateAnswer,
+  formatGuid,
+  toVectorLiteral,
+  recordAiUsage,
+  MATTER_DOCUMENT_TREE_CTE,
+} from "@xbundle/edd-workbench-core";
 
 // mergeParams — mounted at /api/matters/:matterId/ask (see index.ts),
 // behind the same requireMatterAccess() gate as every other :matterId
@@ -54,11 +62,20 @@ askRouter.post("/", async (req: Request<{ matterId: string }>, res, next) => {
     // `<=>` (cosine distance) matches document_chunks_embedding_hnsw_idx's
     // own `vector_cosine_ops` operator class (migration 026) — `<->` (L2)
     // would silently skip that index.
+    //
+    // Joined through MATTER_DOCUMENT_TREE_CTE (not the raw documents table)
+    // so guid_number here is the same tree-position-derived
+    // display_guid_number the documents list endpoint shows — the raw
+    // column is insertion-order, not tree order, and citing it directly
+    // used to show a different number than the results table for the same
+    // document (see documentTree.ts's own comment for why they diverge).
     const rows = await withOrgSession(orgId, (client) =>
       client.query<RetrievedChunkRow>(
-        `SELECT dc.document_id, dc.text, dc.embedding <=> $2::vector AS distance, d.guid_number, d.original_filename
+        `${MATTER_DOCUMENT_TREE_CTE}
+         SELECT dc.document_id, dc.text, dc.embedding <=> $2::vector AS distance,
+                n.display_guid_number AS guid_number, n.original_filename
          FROM document_chunks dc
-         JOIN documents d ON d.id = dc.document_id
+         JOIN numbered n ON n.id = dc.document_id
          WHERE dc.matter_id = $1
          ORDER BY dc.embedding <=> $2::vector
          LIMIT $3`,

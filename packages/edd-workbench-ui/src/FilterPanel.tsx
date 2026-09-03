@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 import type { ApiClient } from "./api";
-import type { TagSetDTO, MatterMemberDTO, MatterMemberCandidateDTO, DocumentDTO } from "./types";
+import type { TagSetDTO, MatterMemberDTO, MatterMemberCandidateDTO, DocumentDTO, AskResultDTO } from "./types";
 import { ExportButtons } from "./ExportButtons";
 import { RetryIngestButton } from "./RetryIngestButton";
 
@@ -25,6 +25,11 @@ export interface FilterPanelProps {
   appliedTagsByDocument: Record<string, string[]>;
   searchQuery: string;
   onSearchQueryChange: (query: string) => void;
+  /** Set (not thrown) by MatterDetail's debounced search effect on a 503/network failure — falls back to showing the unfiltered list rather than blocking the panel. */
+  searchError: string | null;
+  /** Both null when there's no active search; otherwise the returned/total hit counts, for the "showing first N of M" truncation note. */
+  searchTotalHits: number | null;
+  matchingDocumentCount: number | null;
   selectedTagIds: string[];
   onToggleTagId: (tagId: string) => void;
   matchMode: "all" | "any";
@@ -38,16 +43,19 @@ export interface FilterPanelProps {
   onStatusFilterChange: (status: IngestStatusFilter) => void;
   /** Called after a successful retry-ingest so the caller re-fetches the document list. */
   onDocumentsChanged: () => void;
+  /** Lifts a fresh Ask result up to MatterDetail, which renders it in the right-hand panel below CodingPanel. Called with null to clear. */
+  onAskResult: (result: AskResultDTO | null) => void;
 }
 
 /**
  * Search + tag filter + export, matching the POC's left-column layout.
- * Search is a real (client-side, filename-substring) filter over the
- * matter's already-loaded document list — no search backend exists yet, so
- * this is the honest version of that feature rather than a Boolean/FTS
- * mockup with no engine behind it. Tag filtering is genuinely interactive
- * against the same mocked tag state CodingPanel writes to (see api.ts) —
- * counts and matches update live as tags are toggled elsewhere.
+ * Search is a real backend query (self-hosted Elasticsearch, boolean/
+ * phrase-exact matching — see search.ts/searchClient.ts) scoped to this
+ * matter, debounced in MatterDetail; this component only renders the box
+ * and any error/truncation note, the actual request lives one level up.
+ * Tag filtering is genuinely interactive against the same mocked tag state
+ * CodingPanel writes to (see api.ts) — counts and matches update live as
+ * tags are toggled elsewhere.
  */
 export function FilterPanel({
   api,
@@ -58,6 +66,9 @@ export function FilterPanel({
   appliedTagsByDocument,
   searchQuery,
   onSearchQueryChange,
+  searchError,
+  searchTotalHits,
+  matchingDocumentCount,
   selectedTagIds,
   onToggleTagId,
   matchMode,
@@ -68,6 +79,7 @@ export function FilterPanel({
   statusFilter,
   onStatusFilterChange,
   onDocumentsChanged,
+  onAskResult,
 }: FilterPanelProps) {
   const allTags = tagSets.flatMap((tagSet) => tagSet.tags);
   const countForTag = (tagId: string) => Object.values(appliedTagsByDocument).filter((tagIds) => tagIds.includes(tagId)).length;
@@ -84,6 +96,10 @@ export function FilterPanel({
   const [accessError, setAccessError] = useState<string | null>(null);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
 
+  const [question, setQuestion] = useState("");
+  const [asking, setAsking] = useState(false);
+  const [askError, setAskError] = useState<string | null>(null);
+
   function refreshMembers() {
     api.getMatterMembers(matterId).then(setMembers).catch((err) => setAccessError(err.message));
   }
@@ -93,8 +109,35 @@ export function FilterPanel({
     setAddingRow(false);
     setCandidates(null);
     refreshMembers();
+    // A stale answer from the previous matter has no meaning here — clear
+    // both the question and the lifted-up result the moment the open
+    // matter changes.
+    setQuestion("");
+    setAskError(null);
+    onAskResult(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [matterId]);
+
+  async function handleAsk() {
+    const trimmed = question.trim();
+    if (!trimmed) return;
+    setAsking(true);
+    setAskError(null);
+    try {
+      const result = await api.askQuestion(matterId, trimmed);
+      onAskResult(result);
+    } catch (err) {
+      setAskError((err as Error).message);
+    } finally {
+      setAsking(false);
+    }
+  }
+
+  function handleClearQuestion() {
+    setQuestion("");
+    setAskError(null);
+    onAskResult(null);
+  }
 
   function openAddRow() {
     setAddingRow(true);
@@ -143,7 +186,38 @@ export function FilterPanel({
     <section className="col col-left" style={style}>
       <div className="section">
         <h2 className="panel-title">Search</h2>
-        <input className="search-box" placeholder="Search filenames…" value={searchQuery} onChange={(e) => onSearchQueryChange(e.target.value)} />
+        <input
+          className="search-box"
+          placeholder='Search documents… ("exact phrase", +required, -excluded)'
+          value={searchQuery}
+          onChange={(e) => onSearchQueryChange(e.target.value)}
+        />
+        {searchError && <p className="bulk-note">{searchError}</p>}
+        {searchTotalHits !== null && matchingDocumentCount !== null && searchTotalHits > matchingDocumentCount && (
+          <p className="bulk-note">
+            Showing first {matchingDocumentCount} of {searchTotalHits} matches — narrow your search
+          </p>
+        )}
+      </div>
+
+      <div className="section">
+        <h2 className="panel-title">Question</h2>
+        <textarea
+          className="search-box"
+          rows={3}
+          placeholder="Ask a question about this matter…"
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+        />
+        {askError && <p className="bulk-note">{askError}</p>}
+        <div className="ask-row">
+          <button type="button" className="clear-filters" onClick={handleClearQuestion} disabled={!question && !askError}>
+            Clear
+          </button>
+          <button type="button" className="pop-out-btn" onClick={handleAsk} disabled={!question.trim() || asking}>
+            {asking ? "Asking…" : "Ask"}
+          </button>
+        </div>
       </div>
 
       <div className="section">
@@ -180,17 +254,7 @@ export function FilterPanel({
       </div>
 
       <div className="section">
-        <h2 className="panel-title">Export</h2>
-        <ExportButtons api={api} matterId={matterId} selectedDocumentIds={selectedDocumentIds} />
-        <p className="export-hint">
-          {selectedDocumentIds.length === 0
-            ? "Check documents in the table to enable export."
-            : `Exports the ${selectedDocumentIds.length} currently checked document${selectedDocumentIds.length === 1 ? "" : "s"} — as a zip (Export documents) or a metadata CSV (Export properties).`}
-        </p>
-      </div>
-
-      <div className="section">
-        <h2 className="panel-title">Processing</h2>
+        <h2 className="panel-title">Processing Filter</h2>
         <select
           className="search-box"
           aria-label="Filter by processing status"
@@ -208,6 +272,16 @@ export function FilterPanel({
           {failedSelectedDocumentIds.length === 0
             ? "Check failed documents in the table to enable retry."
             : `Retries ingest for the ${failedSelectedDocumentIds.length} currently checked failed document${failedSelectedDocumentIds.length === 1 ? "" : "s"}.`}
+        </p>
+      </div>
+
+      <div className="section">
+        <h2 className="panel-title">Export</h2>
+        <ExportButtons api={api} matterId={matterId} selectedDocumentIds={selectedDocumentIds} />
+        <p className="export-hint">
+          {selectedDocumentIds.length === 0
+            ? "Check documents in the table to enable export."
+            : `Exports the ${selectedDocumentIds.length} currently checked document${selectedDocumentIds.length === 1 ? "" : "s"} — as a zip (Export documents) or a metadata CSV (Export properties).`}
         </p>
       </div>
 

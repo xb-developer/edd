@@ -1,4 +1,4 @@
-import { withOrgSession, resolveEmbeddableText, chunkText, embedTexts, replaceDocumentChunks } from "@xbundle/edd-workbench-core";
+import { withOrgSession, resolveEmbeddableText, chunkText, embedTexts, replaceDocumentChunks, recordAiUsage } from "@xbundle/edd-workbench-core";
 
 interface EmbeddingMessage {
   documentId: string;
@@ -9,6 +9,7 @@ interface DocumentRow {
   matter_id: string;
   content_type_detected: string;
   metadata: Record<string, unknown> | null;
+  uploaded_by: string | null;
 }
 
 /**
@@ -34,9 +35,10 @@ export async function handleEmbeddingMessage(body: string): Promise<void> {
   const { documentId, orgId } = JSON.parse(body) as EmbeddingMessage;
 
   const doc = await withOrgSession(orgId, async (client) => {
-    const rows = await client.query<DocumentRow>("SELECT matter_id, content_type_detected, metadata FROM documents WHERE id = $1", [
-      documentId,
-    ]);
+    const rows = await client.query<DocumentRow>(
+      "SELECT matter_id, content_type_detected, metadata, uploaded_by FROM documents WHERE id = $1",
+      [documentId],
+    );
     return rows.rows[0] ?? null;
   });
   // Document deleted between being enqueued and this message being picked
@@ -57,7 +59,7 @@ export async function handleEmbeddingMessage(body: string): Promise<void> {
 
   try {
     const chunks = chunkText(text);
-    const embeddings = await embedTexts(chunks);
+    const { embeddings, totalTokens } = await embedTexts(chunks);
     await withOrgSession(orgId, async (client) => {
       await replaceDocumentChunks(client, {
         orgId,
@@ -67,6 +69,13 @@ export async function handleEmbeddingMessage(body: string): Promise<void> {
       });
       await client.query("UPDATE documents SET embedding_status = 'ready' WHERE id = $1", [documentId]);
     });
+    // Attributed to the uploader, not whoever's request happened to
+    // trigger the async ingest->embedding hand-off — there usually isn't
+    // one (SQS redelivery, a scheduled retry). Old rows predating
+    // uploaded_by being populated simply aren't attributable to anyone.
+    if (doc.uploaded_by) {
+      await recordAiUsage(orgId, doc.uploaded_by, "embedding", totalTokens);
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await withOrgSession(orgId, (client) =>

@@ -28,6 +28,32 @@ export interface MatterMemberCandidateDTO {
   name: string | null;
 }
 
+/** The result of asking a matter-scoped RAG question — see ask.ts. `relevantDocuments` is decided by retrieval (deterministic, cosine-similarity), `answer` is generated prose grounded only in those documents' matching excerpts. */
+export interface AskResultDTO {
+  answer: string;
+  relevantDocuments: { documentId: string; guid: string; filename: string }[];
+}
+
+/** The caller's own running AI token usage, broken down by call site (see aiUsage.ts) plus their sum. */
+export interface AiUsageDTO {
+  embedding: number;
+  ask: number;
+  summarization: number;
+  total: number;
+}
+
+/** A matter-scoped full-text search result — see search.ts. totalHits may exceed documentIds.length if the match count was capped server-side. */
+export interface SearchResultDTO {
+  documentIds: string[];
+  totalHits: number;
+}
+
+/** The calling admin's own org: Elasticsearch's live document count vs. Postgres's own ready/failed count — see searchHealth.ts. A mismatch usually means the search index needs reindexSearch.ts re-run (e.g. after an Elasticsearch instance replacement). */
+export interface SearchHealthDTO {
+  esDocCount: number;
+  postgresDocCount: number;
+}
+
 export interface DocumentDTO {
   documentId: string;
   guid: string;

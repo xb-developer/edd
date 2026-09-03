@@ -180,6 +180,18 @@ header.topbar {
   border-color: var(--seal);
   color: var(--seal);
 }
+.ai-usage-bar {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.75);
+}
+.ai-usage-chip {
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  padding: 3px 8px;
+  white-space: nowrap;
+}
 /* MAIN GRID */
 main.layout {
   display: flex;
@@ -984,6 +996,49 @@ table.reg tbody tr.active {
   border-radius: 4px;
   font-size: 11.5px;
   margin-bottom: 12px;
+}
+
+/* RAG "Ask" question box (FilterPanel) and answer panel (AskResultPanel) */
+textarea.search-box {
+  resize: vertical;
+}
+.ask-row {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.ask-result-panel {
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+}
+.ask-answer {
+  font-size: 12.5px;
+  line-height: 1.5;
+  margin: 0 0 10px 0;
+  white-space: pre-wrap;
+}
+.ask-relevant-documents {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ask-relevant-document-btn {
+  width: 100%;
+  text-align: left;
+  font-size: 11.5px;
+  color: var(--ink-soft);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 6px 9px;
+}
+.ask-relevant-document-btn:hover {
+  border-color: var(--navy);
+  color: var(--navy);
+  background: var(--navy-soft);
 }
 
 /* EMAIL PREVIEW (.eml / .msg) */

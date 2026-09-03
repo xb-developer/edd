@@ -8,6 +8,10 @@ const EMBEDDING_QUEUE_URL = process.env.EDD_WORKBENCH_EMBEDDING_QUEUE_URL;
 if (!EMBEDDING_QUEUE_URL) {
   throw new Error("EDD_WORKBENCH_EMBEDDING_QUEUE_URL environment variable is required");
 }
+const SEARCH_INDEX_QUEUE_URL = process.env.EDD_WORKBENCH_SEARCHINDEX_QUEUE_URL;
+if (!SEARCH_INDEX_QUEUE_URL) {
+  throw new Error("EDD_WORKBENCH_SEARCHINDEX_QUEUE_URL environment variable is required");
+}
 
 /**
  * Handles one { documentId, orgId } message off the ocr queue — see
@@ -41,10 +45,25 @@ export async function handleOcrMessage(body: string): Promise<void> {
     // outcome is exactly the same trigger point for embedding eligibility
     // as any other extractor's own 'ready' outcome.
     await sqsClient.send(new SendMessageCommand({ QueueUrl: EMBEDDING_QUEUE_URL, MessageBody: JSON.stringify({ documentId, orgId }) }));
+    // This is the "update" half of create-at-ingest-then-update-after-OCR:
+    // ingest.ts already sent an immediate (filename-only) search-index
+    // message when it handed this document off to OCR instead of reaching
+    // 'ready' itself — this second message, same documentId, now updates
+    // that same Elasticsearch doc with the real OCR'd body text.
+    await sqsClient.send(
+      new SendMessageCommand({ QueueUrl: SEARCH_INDEX_QUEUE_URL, MessageBody: JSON.stringify({ documentId, orgId }) }),
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await withOrgSession(orgId, (client) =>
       client.query("UPDATE documents SET ingest_status = 'failed', ingest_error = $1 WHERE id = $2", [message, documentId]),
+    );
+    // A failed OCR is still a terminal state for search purposes — the
+    // document must remain filename-searchable (matching today's
+    // status-agnostic client-side filter), even though the body stays
+    // whatever it already was (empty, in this OCR-needed path).
+    await sqsClient.send(
+      new SendMessageCommand({ QueueUrl: SEARCH_INDEX_QUEUE_URL, MessageBody: JSON.stringify({ documentId, orgId }) }),
     );
   }
 }

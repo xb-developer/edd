@@ -19,6 +19,7 @@ import {
   extractSevenZipMembers,
   iterateMboxMessages,
   DOCUMENTS_BUCKET,
+  deleteDocumentFromIndex,
   type ContentType,
 } from "@xbundle/edd-workbench-core";
 
@@ -27,6 +28,10 @@ import {
 const INGEST_QUEUE_URL = process.env.EDD_WORKBENCH_INGEST_QUEUE_URL;
 if (!INGEST_QUEUE_URL) {
   throw new Error("EDD_WORKBENCH_INGEST_QUEUE_URL environment variable is required");
+}
+const SEARCH_INDEX_QUEUE_URL = process.env.EDD_WORKBENCH_SEARCHINDEX_QUEUE_URL;
+if (!SEARCH_INDEX_QUEUE_URL) {
+  throw new Error("EDD_WORKBENCH_SEARCHINDEX_QUEUE_URL environment variable is required");
 }
 
 /**
@@ -277,6 +282,12 @@ export async function finalizeTransparentContainer(params: {
         params.documentId,
       ]),
     );
+    // The row survives with a terminal 'ready' status — same "must stay
+    // filename-searchable regardless of status" reasoning as ingest.ts's
+    // own non-container branches.
+    await sqsClient.send(
+      new SendMessageCommand({ QueueUrl: SEARCH_INDEX_QUEUE_URL, MessageBody: JSON.stringify({ documentId: params.documentId, orgId: params.orgId }) }),
+    );
     return;
   }
 
@@ -285,12 +296,21 @@ export async function finalizeTransparentContainer(params: {
     await s3Client.send(new DeleteObjectCommand({ Bucket: DOCUMENTS_BUCKET, Key: params.s3Key })).catch((err) => {
       console.error(`Failed to delete S3 object ${params.s3Key} for transparently-expanded container ${params.documentId}:`, err);
     });
+    // No row left to index — best-effort cleanup of a prior indexing
+    // attempt's entry, same "delete on document delete" reasoning as
+    // documents.ts's own route, since this row is genuinely gone.
+    await deleteDocumentFromIndex(params.documentId).catch((err) => {
+      console.error(`Failed to remove search index entry for transparently-expanded container ${params.documentId}:`, err);
+    });
   } else {
     await withOrgSession(params.orgId, (client) =>
       client.query("UPDATE documents SET ingest_status = 'ready', metadata = $1 WHERE id = $2", [
         JSON.stringify({ memberCount: params.result.succeeded, failedMemberCount: params.result.failures.length, failures: params.result.failures }),
         params.documentId,
       ]),
+    );
+    await sqsClient.send(
+      new SendMessageCommand({ QueueUrl: SEARCH_INDEX_QUEUE_URL, MessageBody: JSON.stringify({ documentId: params.documentId, orgId: params.orgId }) }),
     );
   }
 }
@@ -300,6 +320,9 @@ export async function markContainerFailed(orgId: string, documentId: string, err
   await withOrgSession(orgId, (client) =>
     client.query("UPDATE documents SET ingest_status = 'failed', ingest_error = $1 WHERE id = $2", [error, documentId]),
   );
+  // The row survives with a terminal 'failed' status — must stay
+  // filename-searchable, matching today's status-agnostic filter.
+  await sqsClient.send(new SendMessageCommand({ QueueUrl: SEARCH_INDEX_QUEUE_URL, MessageBody: JSON.stringify({ documentId, orgId }) }));
 }
 
 export interface ContainerIngestParams {

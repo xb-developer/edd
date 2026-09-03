@@ -2,9 +2,10 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { createPortal } from "react-dom";
 import type { DragEvent as ReactDragEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import type { ApiClient } from "./api";
-import type { DocumentDTO, TagSetDTO } from "./types";
+import type { DocumentDTO, TagSetDTO, AskResultDTO } from "./types";
 import { DocumentViewer } from "./DocumentViewer";
 import { CodingPanel } from "./CodingPanel";
+import { AskResultPanel } from "./AskResultPanel";
 import { FilterPanel, type IngestStatusFilter } from "./FilterPanel";
 import { DocumentPropertiesPanel } from "./DocumentPropertiesPanel";
 import { useViewerWindow } from "./viewer-window/useViewerWindow";
@@ -217,6 +218,17 @@ export function MatterDetail({ api, matterId, canManageAccess }: MatterDetailPro
   const [documents, setDocuments] = useState<DocumentDTO[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
+  const [askResult, setAskResult] = useState<AskResultDTO | null>(null);
+  // Independent of matchingDocumentIds (search) — combined via AND in
+  // filteredDocuments below, same as the existing status/tag filters, so
+  // asking a question doesn't clobber (or get clobbered by) an active
+  // search. null = no active ask result, don't restrict the table.
+  const [askRelevantDocumentIds, setAskRelevantDocumentIds] = useState<Set<string> | null>(null);
+
+  function handleAskResult(result: AskResultDTO | null) {
+    setAskResult(result);
+    setAskRelevantDocumentIds(result ? new Set(result.relevantDocuments.map((d) => d.documentId)) : null);
+  }
   // Fully independent of selectedDocumentId (which drives the single-doc
   // preview) — this is the bulk-coding/export selection. Deliberately not
   // pruned when a search/tag filter hides a row; see the toolbar's
@@ -250,6 +262,12 @@ export function MatterDetail({ api, matterId, canManageAccess }: MatterDetailPro
   const [tagSets, setTagSets] = useState<TagSetDTO[]>([]);
   const [appliedTagsByDocument, setAppliedTagsByDocument] = useState<Record<string, string[]>>({});
   const [searchQuery, setSearchQuery] = useState("");
+  // null = no active search (show everything, today's empty-query
+  // behavior) — distinct from an empty Set, which would mean "searched,
+  // zero matches."
+  const [matchingDocumentIds, setMatchingDocumentIds] = useState<Set<string> | null>(null);
+  const [searchTotalHits, setSearchTotalHits] = useState<number | null>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<IngestStatusFilter>("all");
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [tagMatchMode, setTagMatchMode] = useState<"all" | "any">("all");
@@ -275,6 +293,37 @@ export function MatterDetail({ api, matterId, canManageAccess }: MatterDetailPro
   }
 
   useEffect(refreshDocuments, [matterId]);
+
+  // Debounced so a real backend request isn't fired on every keystroke —
+  // Elasticsearch-backed, replacing the old client-side filename filter
+  // entirely (see FilterPanel.tsx's own updated comment).
+  useEffect(() => {
+    const trimmed = searchQuery.trim();
+    if (!trimmed) {
+      setMatchingDocumentIds(null);
+      setSearchTotalHits(null);
+      setSearchError(null);
+      return;
+    }
+    const timer = setTimeout(() => {
+      api
+        .searchDocuments(matterId, trimmed)
+        .then((result) => {
+          setMatchingDocumentIds(new Set(result.documentIds));
+          setSearchTotalHits(result.totalHits);
+          setSearchError(null);
+        })
+        .catch((err) => {
+          // Falls back to showing the unfiltered list (matchesSearch below
+          // treats a still-null matchingDocumentIds as "no filter") rather
+          // than blocking the whole panel on a search-service hiccup.
+          setMatchingDocumentIds(null);
+          setSearchTotalHits(null);
+          setSearchError((err as Error).message);
+        });
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [api, matterId, searchQuery]);
 
   function refreshTagState() {
     api.getTagSets(matterId).then(setTagSets).catch((err) => setError(err.message));
@@ -328,8 +377,10 @@ export function MatterDetail({ api, matterId, canManageAccess }: MatterDetailPro
 
   const filteredDocuments =
     documents?.filter((doc) => {
-      const matchesSearch = searchQuery.trim().length === 0 || doc.originalFilename.toLowerCase().includes(searchQuery.trim().toLowerCase());
+      const matchesSearch = matchingDocumentIds === null || matchingDocumentIds.has(doc.documentId);
       if (!matchesSearch) return false;
+      const matchesAsk = askRelevantDocumentIds === null || askRelevantDocumentIds.has(doc.documentId);
+      if (!matchesAsk) return false;
       if (statusFilter !== "all" && doc.ingestStatus !== statusFilter) return false;
       if (selectedTagIds.length === 0) return true;
       const appliedIds = appliedTagsByDocument[doc.documentId] ?? [];
@@ -488,6 +539,9 @@ export function MatterDetail({ api, matterId, canManageAccess }: MatterDetailPro
             appliedTagsByDocument={appliedTagsByDocument}
             searchQuery={searchQuery}
             onSearchQueryChange={setSearchQuery}
+            searchError={searchError}
+            searchTotalHits={searchTotalHits}
+            matchingDocumentCount={matchingDocumentIds?.size ?? null}
             selectedTagIds={selectedTagIds}
             onToggleTagId={toggleTagFilter}
             matchMode={tagMatchMode}
@@ -498,6 +552,7 @@ export function MatterDetail({ api, matterId, canManageAccess }: MatterDetailPro
             statusFilter={statusFilter}
             onStatusFilterChange={setStatusFilter}
             onDocumentsChanged={refreshDocuments}
+            onAskResult={handleAskResult}
           />
 
           <div className={`col-resize-handle${leftResize.dragging ? " dragging" : ""}`} {...leftResize} />
@@ -830,6 +885,7 @@ export function MatterDetail({ api, matterId, canManageAccess }: MatterDetailPro
                 />
               </>
             )}
+            {askResult && <AskResultPanel result={askResult} onSelectDocument={setSelectedDocumentId} />}
           </section>
         </main>
       )}

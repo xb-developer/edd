@@ -8,9 +8,12 @@ import { handleOcrMessage } from "./ocrQueue.js";
 // Explicit, not relying on some other test file's own beforeAll happening
 // to run first — a successful OCR now unconditionally enqueues an
 // embedding check (see ocrQueue.ts's own hand-off), so this queue must
-// exist before this file's success-path test runs.
+// exist before this file's success-path test runs. search-index-test is
+// needed by BOTH the success and failure paths — a failed OCR still
+// enqueues a search-index update so the document stays filename-searchable.
 beforeAll(async () => {
   await sqsClient.send(new CreateQueueCommand({ QueueName: "edd-workbench-embedding-test" }));
+  await sqsClient.send(new CreateQueueCommand({ QueueName: "edd-workbench-search-index-test" }));
 });
 
 async function deleteTestOrg(orgId: string): Promise<void> {

@@ -9,6 +9,10 @@ import type {
   MatterMemberDTO,
   MatterMemberCandidateDTO,
   WorkerStatusDTO,
+  AskResultDTO,
+  AiUsageDTO,
+  SearchResultDTO,
+  SearchHealthDTO,
 } from "./types";
 
 /**
@@ -164,6 +168,23 @@ export function createApiClient(baseUrl: string, getAccessToken: () => Promise<s
 
     /** Admin-only server-side (403 otherwise) — live queue depth plus each queue's own worker heartbeat, backing the topbar's WorkerHealthBar. */
     getWorkerStatus: () => request<WorkerStatusDTO>("/worker-status"),
+
+    /** May take several seconds (embeds the question, does a similarity search, then a real generation call) and 503s outside the self-hosted GPU services' business-hours schedule — see ask.ts. */
+    askQuestion: (matterId: string, question: string) =>
+      request<AskResultDTO>(`/matters/${matterId}/ask`, {
+        method: "POST",
+        body: JSON.stringify({ question }),
+      }),
+
+    /** The caller's own running token usage across the self-hosted AI services, broken down by call site — backs the topbar's AiUsageBadge. */
+    getAiUsage: () => request<AiUsageDTO>("/ai-usage/me"),
+
+    /** Boolean/phrase-exact full-text search over this matter's documents (self-hosted Elasticsearch — see search.ts). Empty/blank query returns no results without a real request. */
+    searchDocuments: (matterId: string, query: string) =>
+      request<SearchResultDTO>(`/matters/${matterId}/search?q=${encodeURIComponent(query)}`),
+
+    /** Admin-only server-side (403 otherwise) — backs the topbar's WorkerHealthBar search-index chip. */
+    getSearchHealth: () => request<SearchHealthDTO>("/search-health"),
   };
 }
 

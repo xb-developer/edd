@@ -12,6 +12,18 @@ const EMBEDDING_DIMENSIONS = 1024;
 
 interface EmbeddingApiResponse {
   data: { embedding: number[]; index: number }[];
+  // Optional — defensive, not because vLLM's OpenAI-compatible endpoint
+  // ever omits it in practice, but so a response shape change degrades to
+  // "usage under-counted as 0" rather than a thrown exception.
+  usage?: { total_tokens: number };
+}
+
+export interface EmbedTextsResult {
+  embeddings: number[][];
+  // Sum of prompt tokens across every string in `texts` for this one
+  // batched call — embeddings are encode-only, so there's no separate
+  // completion-token count the way generation has.
+  totalTokens: number;
 }
 
 /**
@@ -28,7 +40,7 @@ interface EmbeddingApiResponse {
  * to have this env var set the way the worker/server apps' own
  * fail-fast-at-startup checks do for their own required vars.
  */
-export async function embedTexts(texts: string[]): Promise<number[][]> {
+export async function embedTexts(texts: string[]): Promise<EmbedTextsResult> {
   const serviceUrl = process.env.EMBEDDING_SERVICE_URL;
   if (!serviceUrl) {
     throw new Error("EMBEDDING_SERVICE_URL environment variable is required");
@@ -44,9 +56,10 @@ export async function embedTexts(texts: string[]): Promise<number[][]> {
     throw new Error(`Embedding request failed: ${res.status} ${body}`);
   }
 
-  const { data } = (await res.json()) as EmbeddingApiResponse;
+  const { data, usage } = (await res.json()) as EmbeddingApiResponse;
   // The API is documented to preserve input order, but sorting by the
   // response's own `index` is cheap insurance against relying on that
   // rather than an explicitly-stated guarantee.
-  return [...data].sort((a, b) => a.index - b.index).map((item) => item.embedding);
+  const embeddings = [...data].sort((a, b) => a.index - b.index).map((item) => item.embedding);
+  return { embeddings, totalTokens: usage?.total_tokens ?? 0 };
 }

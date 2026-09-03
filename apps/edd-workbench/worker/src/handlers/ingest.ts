@@ -28,6 +28,10 @@ const EMBEDDING_QUEUE_URL = process.env.EDD_WORKBENCH_EMBEDDING_QUEUE_URL;
 if (!EMBEDDING_QUEUE_URL) {
   throw new Error("EDD_WORKBENCH_EMBEDDING_QUEUE_URL environment variable is required");
 }
+const SEARCH_INDEX_QUEUE_URL = process.env.EDD_WORKBENCH_SEARCHINDEX_QUEUE_URL;
+if (!SEARCH_INDEX_QUEUE_URL) {
+  throw new Error("EDD_WORKBENCH_SEARCHINDEX_QUEUE_URL environment variable is required");
+}
 
 interface IngestMessage {
   documentId: string;
@@ -82,6 +86,18 @@ async function streamToBuffer(stream: Readable): Promise<Buffer> {
 export async function handleIngestMessage(body: string): Promise<void> {
   const { documentId, orgId } = JSON.parse(body) as IngestMessage;
 
+  // Set once we know this is a real, non-container document — every branch
+  // below reaches a terminal state (ready via any extractor, the OCR
+  // hand-off, or a caught failure), and today's filename search doesn't
+  // gate on ingest_status, so the replacement search-index entry must be
+  // created for all three, not just the success path. Container types
+  // (pst/zip/7z/mbox) get their own search-index hand-off from
+  // containerExpansion.ts instead, once their own per-member processing
+  // actually finishes. Read after withOrgSession resolves, not inside its
+  // callback, so the message is never dequeued before this transaction
+  // actually commits.
+  let shouldIndexForSearch = false;
+
   const containerJob = await withOrgSession(orgId, async (client) => {
     const docRow = await client.query<DocumentRow>(
       "SELECT s3_key, content_type_detected, matter_id, size_bytes, family_document_id, depth, parent_document_id FROM documents WHERE id = $1",
@@ -105,6 +121,8 @@ export async function handleIngestMessage(body: string): Promise<void> {
     if (contentType === "pst" || contentType === "zip" || contentType === "7z" || contentType === "mbox") {
       return { contentType, s3Key, matterId, sizeBytes, familyDocumentId, depth, parentDocumentId };
     }
+
+    shouldIndexForSearch = true;
 
     // Every branch below reaches 'ready' except the OCR hand-off, which
     // stays 'processing' — embedding only makes sense once there's a
@@ -266,6 +284,12 @@ export async function handleIngestMessage(body: string): Promise<void> {
     }
     return null;
   });
+
+  if (shouldIndexForSearch) {
+    await sqsClient.send(
+      new SendMessageCommand({ QueueUrl: SEARCH_INDEX_QUEUE_URL, MessageBody: JSON.stringify({ documentId, orgId }) }),
+    );
+  }
 
   if (containerJob?.contentType === "pst") {
     await handlePstIngest({

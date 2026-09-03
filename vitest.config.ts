@@ -25,6 +25,7 @@ export default defineConfig({
       EDD_WORKBENCH_EXPORT_QUEUE_URL: "http://localhost:9324/queue/edd-workbench-export-test",
       EDD_WORKBENCH_OCR_QUEUE_URL: "http://localhost:9324/queue/edd-workbench-ocr-test",
       EDD_WORKBENCH_EMBEDDING_QUEUE_URL: "http://localhost:9324/queue/edd-workbench-embedding-test",
+      EDD_WORKBENCH_SEARCHINDEX_QUEUE_URL: "http://localhost:9324/queue/edd-workbench-search-index-test",
     },
     testTimeout: 15000,
     // Every test file shares the same real local Postgres/MinIO/ElasticMQ —

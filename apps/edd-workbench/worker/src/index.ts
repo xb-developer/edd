@@ -10,17 +10,19 @@ import { consumeQueue } from "@xbundle/edd-workbench-core";
 import { handleIngestMessage } from "./handlers/ingest.js";
 import { handleExportMessage } from "./handlers/export.js";
 import { handleEmbeddingMessage } from "./handlers/embedding.js";
+import { handleSearchIndexMessage } from "./handlers/searchIndex.js";
 
 const INGEST_QUEUE_URL = process.env.EDD_WORKBENCH_INGEST_QUEUE_URL;
 const EXPORT_QUEUE_URL = process.env.EDD_WORKBENCH_EXPORT_QUEUE_URL;
 const EMBEDDING_QUEUE_URL = process.env.EDD_WORKBENCH_EMBEDDING_QUEUE_URL;
-if (!INGEST_QUEUE_URL || !EXPORT_QUEUE_URL || !EMBEDDING_QUEUE_URL) {
+const SEARCH_INDEX_QUEUE_URL = process.env.EDD_WORKBENCH_SEARCHINDEX_QUEUE_URL;
+if (!INGEST_QUEUE_URL || !EXPORT_QUEUE_URL || !EMBEDDING_QUEUE_URL || !SEARCH_INDEX_QUEUE_URL) {
   throw new Error(
-    "EDD_WORKBENCH_INGEST_QUEUE_URL, EDD_WORKBENCH_EXPORT_QUEUE_URL, and EDD_WORKBENCH_EMBEDDING_QUEUE_URL environment variables are required",
+    "EDD_WORKBENCH_INGEST_QUEUE_URL, EDD_WORKBENCH_EXPORT_QUEUE_URL, EDD_WORKBENCH_EMBEDDING_QUEUE_URL, and EDD_WORKBENCH_SEARCHINDEX_QUEUE_URL environment variables are required",
   );
 }
 
-console.log("EDD Workbench worker starting — consuming ingest, export, and embedding queues");
+console.log("EDD Workbench worker starting — consuming ingest, export, embedding, and search-index queues");
 
 // Aborted on SIGTERM (what ECS sends on deploy/scale-down before killing
 // the task outright) — consumeQueue's AbortSignal support means this is a
@@ -43,6 +45,7 @@ await Promise.all([
   consumeQueue(INGEST_QUEUE_URL, "ingest", handleIngestMessage, shutdownController.signal),
   consumeQueue(EXPORT_QUEUE_URL, "export", handleExportMessage, shutdownController.signal),
   consumeQueue(EMBEDDING_QUEUE_URL, "embedding", handleEmbeddingMessage, shutdownController.signal),
+  consumeQueue(SEARCH_INDEX_QUEUE_URL, "search-index", handleSearchIndexMessage, shutdownController.signal),
 ]);
 
 console.log("EDD Workbench worker stopped.");

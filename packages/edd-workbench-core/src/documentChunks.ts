@@ -9,8 +9,9 @@ export interface DocumentChunkInput {
 // ::vector in the query itself — the `pg` driver has no native vector
 // type support, and this is simpler/more direct than pulling in the
 // separate `pgvector` npm package's type-registration helper for one
-// straightforward format.
-function toVectorLiteral(embedding: number[]): string {
+// straightforward format. Exported since ask.ts needs the identical
+// conversion to bind a question's own embedding into a similarity query.
+export function toVectorLiteral(embedding: number[]): string {
   return `[${embedding.join(",")}]`;
 }
 

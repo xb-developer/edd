@@ -13,6 +13,7 @@ import {
   detectContentType,
   MATTER_DOCUMENT_TREE_CTE,
   recordAuditEvent,
+  deleteDocumentFromIndex,
 } from "@xbundle/edd-workbench-core";
 
 // Read at module-load time, matching auth.ts/pool.ts's "fail loudly at
@@ -184,9 +185,9 @@ documentsRouter.get("/:id", async (req: Request<{ matterId: string; id: string }
 // the app actually treats as "does this document exist") are the part
 // that must not silently fail to delete.
 async function deleteDocumentsWithS3Cleanup(orgId: string, actorUserId: string, matterId: string, documentIds: string[]): Promise<number> {
-  const s3Keys = await withOrgSession(orgId, async (client) => {
-    const rows = await client.query<{ s3_key: string; original_filename: string }>(
-      "SELECT s3_key, original_filename FROM documents WHERE matter_id = $1 AND (id = ANY($2::uuid[]) OR parent_document_id = ANY($2::uuid[]))",
+  const deletedRows = await withOrgSession(orgId, async (client) => {
+    const rows = await client.query<{ id: string; s3_key: string; original_filename: string }>(
+      "SELECT id, s3_key, original_filename FROM documents WHERE matter_id = $1 AND (id = ANY($2::uuid[]) OR parent_document_id = ANY($2::uuid[]))",
       [matterId, documentIds],
     );
     await client.query("DELETE FROM documents WHERE matter_id = $1 AND id = ANY($2::uuid[])", [matterId, documentIds]);
@@ -202,18 +203,29 @@ async function deleteDocumentsWithS3Cleanup(orgId: string, actorUserId: string, 
         description: `Deleted file "${row.original_filename}"`,
       });
     }
-    return rows.rows.map((r) => r.s3_key);
+    return rows.rows;
   });
 
   await Promise.all(
-    s3Keys.map((key) =>
-      s3Client.send(new DeleteObjectCommand({ Bucket: DOCUMENTS_BUCKET, Key: key })).catch((err) => {
-        console.error(`Failed to delete S3 object ${key} during a delete of matter ${matterId}'s documents:`, err);
+    deletedRows.map((row) =>
+      s3Client.send(new DeleteObjectCommand({ Bucket: DOCUMENTS_BUCKET, Key: row.s3_key })).catch((err) => {
+        console.error(`Failed to delete S3 object ${row.s3_key} during a delete of matter ${matterId}'s documents:`, err);
+      }),
+    ),
+  );
+  // Same best-effort treatment as the S3 cleanup above — this is an
+  // eDiscovery tool, so "the search index still has a stale entry" is a
+  // real gap (privilege clawback/inadvertent-production deletes need the
+  // extracted text actually gone), not just a UI cosmetic issue.
+  await Promise.all(
+    deletedRows.map((row) =>
+      deleteDocumentFromIndex(row.id).catch((err) => {
+        console.error(`Failed to remove search index entry for document ${row.id} during a delete of matter ${matterId}'s documents:`, err);
       }),
     ),
   );
 
-  return s3Keys.length;
+  return deletedRows.length;
 }
 
 documentsRouter.delete("/:id", async (req: Request<{ matterId: string; id: string }>, res, next) => {

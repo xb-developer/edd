@@ -362,8 +362,12 @@ afterAll(async () => {
 // 'ready' ingest_status, which now unconditionally enqueues an embedding
 // check (see ingest.ts's own hand-off), so this queue must exist before
 // the very first test in this file runs, not just before some of them.
+// search-index-test is the same story — every non-container branch below
+// (ready, OCR hand-off, or a caught failure) unconditionally enqueues a
+// search-index message too.
 beforeAll(async () => {
   await sqsClient.send(new CreateQueueCommand({ QueueName: "edd-workbench-embedding-test" }));
+  await sqsClient.send(new CreateQueueCommand({ QueueName: "edd-workbench-search-index-test" }));
 });
 
 describe("handleIngestMessage", () => {

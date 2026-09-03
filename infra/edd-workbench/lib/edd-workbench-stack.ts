@@ -207,6 +207,17 @@ export class EddWorkbenchStack extends cdk.Stack {
       deadLetterQueue: { queue: embeddingDlq, maxReceiveCount: 50 },
     });
 
+    // Unlike embeddingQueue above, the target service (ElasticsearchService,
+    // below) is always on — no business-hours schedule to outlast — so a
+    // short visibility timeout and a handful of retries is enough, same
+    // "always-up target" reasoning as ocrQueue's own shape.
+    const searchIndexDlq = new sqs.Queue(this, "SearchIndexDlq", { queueName: `edd-workbench-${environmentName}-search-index-dlq` });
+    const searchIndexQueue = new sqs.Queue(this, "SearchIndexQueue", {
+      queueName: `edd-workbench-${environmentName}-search-index`,
+      visibilityTimeout: cdk.Duration.minutes(5),
+      deadLetterQueue: { queue: searchIndexDlq, maxReceiveCount: 5 },
+    });
+
     // --- Secrets: Auth0 --------------------------------------------------
     // CDK-provisioned (not a pre-existing out-of-band secret) so `cdk
     // deploy` alone is enough to create it — the placeholder values below
@@ -266,6 +277,14 @@ export class EddWorkbenchStack extends cdk.Stack {
     // (the worker's own environment, set above the embedding service's own
     // declaration) doesn't need a forward reference to that construct.
     const EMBEDDING_SERVICE_INTERNAL_URL = "http://embedding.edd-workbench.internal:8000";
+    // Same reasoning as EMBEDDING_SERVICE_INTERNAL_URL above — a literal
+    // Cloud Map DNS name, not a forward reference to the GenerationService
+    // construct defined later in this file.
+    const GENERATION_SERVICE_INTERNAL_URL = "http://generation.edd-workbench.internal:8000";
+    // Same reasoning again — a literal Cloud Map DNS name, not a forward
+    // reference to the ElasticsearchService construct defined later in this
+    // file. Port 9200 is Elasticsearch's own default HTTP port.
+    const ELASTICSEARCH_SERVICE_INTERNAL_URL = "http://search.edd-workbench.internal:9200";
 
     // Shared by the api service and the migration task below — one image,
     // one Dockerfile, not two separate builds of the same server code.
@@ -307,6 +326,14 @@ export class EddWorkbenchStack extends cdk.Stack {
           // explicitly rather than leaving index.ts's unrestricted-default
           // (unset-env-var) fallback in place for a real deployment.
           CORS_ALLOWED_ORIGINS: customDomain ? `https://${customDomain.domainName}` : "http://localhost:5283",
+          // ask.ts calls both services directly (retrieval embedding +
+          // grounded-answer generation) — literals, not forward references,
+          // same reasoning as the worker's own EMBEDDING_SERVICE_URL above.
+          EMBEDDING_SERVICE_URL: EMBEDDING_SERVICE_INTERNAL_URL,
+          GENERATION_SERVICE_URL: GENERATION_SERVICE_INTERNAL_URL,
+          // search.ts (query) and documents.ts's delete route (best-effort
+          // index cleanup) both call the search service directly.
+          ELASTICSEARCH_SERVICE_URL: ELASTICSEARCH_SERVICE_INTERNAL_URL,
         },
         secrets: {
           DB_USERNAME: ecs.Secret.fromSecretsManager(appDbSecret, "username"),
@@ -360,10 +387,12 @@ export class EddWorkbenchStack extends cdk.Stack {
         EDD_WORKBENCH_EXPORT_QUEUE_URL: exportQueue.queueUrl,
         EDD_WORKBENCH_OCR_QUEUE_URL: ocrQueue.queueUrl,
         EDD_WORKBENCH_EMBEDDING_QUEUE_URL: embeddingQueue.queueUrl,
+        EDD_WORKBENCH_SEARCHINDEX_QUEUE_URL: searchIndexQueue.queueUrl,
         // Deterministic Cloud Map DNS name (see EmbeddingService below) —
         // a literal, not a reference to that construct, so this container
         // definition doesn't need to be declared after it.
         EMBEDDING_SERVICE_URL: EMBEDDING_SERVICE_INTERNAL_URL,
+        ELASTICSEARCH_SERVICE_URL: ELASTICSEARCH_SERVICE_INTERNAL_URL,
         DB_HOST: database.instanceEndpoint.hostname,
         DB_PORT: database.instanceEndpoint.port.toString(),
       },
@@ -405,6 +434,8 @@ export class EddWorkbenchStack extends cdk.Stack {
     // instead (see embedding.ts's own comment on why it lives here).
     embeddingQueue.grantSendMessages(workerTaskDefinition.taskRole);
     embeddingQueue.grantConsumeMessages(workerTaskDefinition.taskRole);
+    searchIndexQueue.grantSendMessages(workerTaskDefinition.taskRole);
+    searchIndexQueue.grantConsumeMessages(workerTaskDefinition.taskRole);
     documentsBucket.grantReadWrite(workerTaskDefinition.taskRole);
     database.connections.allowDefaultPortFrom(workerService, "Worker service to RDS");
 
@@ -444,6 +475,7 @@ export class EddWorkbenchStack extends cdk.Stack {
       environment: {
         EDD_WORKBENCH_OCR_QUEUE_URL: ocrQueue.queueUrl,
         EDD_WORKBENCH_EMBEDDING_QUEUE_URL: embeddingQueue.queueUrl,
+        EDD_WORKBENCH_SEARCHINDEX_QUEUE_URL: searchIndexQueue.queueUrl,
         DB_HOST: database.instanceEndpoint.hostname,
         DB_PORT: database.instanceEndpoint.port.toString(),
       },
@@ -465,6 +497,8 @@ export class EddWorkbenchStack extends cdk.Stack {
     // see ocrQueue.ts's own comment for why (mirrors ingest.ts's own
     // 'ready' hand-off for every other extractor).
     embeddingQueue.grantSendMessages(ocrTaskDefinition.taskRole);
+    // Same hand-off, for the search index — see ocrQueue.ts's own comment.
+    searchIndexQueue.grantSendMessages(ocrTaskDefinition.taskRole);
     // Read-only — unlike the worker, ocr-service never writes derived
     // artifacts back to S3, only a DB row (its extracted text/status).
     documentsBucket.grantRead(ocrTaskDefinition.taskRole);
@@ -577,7 +611,7 @@ export class EddWorkbenchStack extends cdk.Stack {
 
     const embeddingSecurityGroup = new ec2.SecurityGroup(this, "EmbeddingServiceSecurityGroup", {
       vpc,
-      description: "EDD Workbench embedding service (vLLM) - inbound from the worker only",
+      description: "EDD Workbench embedding service (vLLM) - inbound from the worker and api only",
       allowAllOutbound: true, // needs real internet egress: pulls the vLLM image from Docker Hub and the model weights from Hugging Face
     });
     embeddingSecurityGroup.addIngressRule(
@@ -587,6 +621,13 @@ export class EddWorkbenchStack extends cdk.Stack {
       // other punctuation) — found the hard way via a real CREATE_FAILED,
       // not guessed up front.
       "Worker service to embedding service (vLLM OpenAI-compatible API)",
+    );
+    // ask.ts (api service) embeds the incoming question directly, alongside
+    // the worker's existing use of this same service for document ingest.
+    embeddingSecurityGroup.addIngressRule(
+      apiService.service.connections.securityGroups[0],
+      ec2.Port.tcp(8000),
+      "Api service to embedding service (vLLM OpenAI-compatible API)",
     );
 
     const embeddingTaskDefinition = new ecs.Ec2TaskDefinition(this, "EmbeddingTaskDefinition", {
@@ -693,6 +734,257 @@ export class EddWorkbenchStack extends cdk.Stack {
         roleArn: embeddingSchedulerRole.roleArn,
         input: JSON.stringify({ Cluster: cluster.clusterName, Service: embeddingService.serviceName, DesiredCount: 0 }),
       },
+    });
+
+    // --- Generation service (RAG "Ask" answer generation) ----------------
+    // Second, dedicated GPU instance for text generation — the embedding
+    // GPU above has no VRAM headroom to co-locate a chat-completion model
+    // alongside Qwen3-Embedding-8B. Mirrors the embedding service's own
+    // proven pattern line-for-line: EC2 capacity provider, warm-on-schedule
+    // via EventBridge, Cloud Map internal DNS, same business-hours window
+    // (so "Ask" and embedding come up/down together).
+    const generationInstanceSecurityGroup = new ec2.SecurityGroup(this, "GenerationInstanceSecurityGroup", {
+      vpc,
+      description: "EDD Workbench generation GPU instance - outbound only (pulls vLLM image and model weights)",
+      allowAllOutbound: true,
+    });
+    const generationInstanceRole = new iam.Role(this, "GenerationInstanceRole", {
+      assumedBy: new iam.ServicePrincipal("ec2.amazonaws.com"),
+      managedPolicies: [
+        iam.ManagedPolicy.fromAwsManagedPolicyName("service-role/AmazonEC2ContainerServiceforEC2Role"),
+      ],
+    });
+    const generationLaunchTemplate = new ec2.LaunchTemplate(this, "GenerationLaunchTemplate", {
+      instanceType: ec2.InstanceType.of(ec2.InstanceClass.G6, ec2.InstanceSize.XLARGE),
+      machineImage: ecs.EcsOptimizedImage.amazonLinux2(ecs.AmiHardwareType.GPU),
+      securityGroup: generationInstanceSecurityGroup,
+      role: generationInstanceRole,
+      userData: ec2.UserData.forLinux(),
+      blockDevices: [{ deviceName: "/dev/xvda", volume: autoscaling.BlockDeviceVolume.ebs(100) }],
+    });
+    const generationAsg = new autoscaling.AutoScalingGroup(this, "GenerationAsg", {
+      vpc,
+      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      launchTemplate: generationLaunchTemplate,
+      minCapacity: 0,
+      maxCapacity: 1,
+    });
+    const generationCapacityProvider = new ecs.AsgCapacityProvider(this, "GenerationCapacityProvider", {
+      autoScalingGroup: generationAsg,
+      enableManagedScaling: true,
+      targetCapacityPercent: 100,
+      enableManagedTerminationProtection: false,
+    });
+    cluster.addAsgCapacityProvider(generationCapacityProvider);
+
+    const generationSecurityGroup = new ec2.SecurityGroup(this, "GenerationServiceSecurityGroup", {
+      vpc,
+      description: "EDD Workbench generation service (vLLM) - inbound from the api only",
+      allowAllOutbound: true,
+    });
+    generationSecurityGroup.addIngressRule(
+      apiService.service.connections.securityGroups[0],
+      ec2.Port.tcp(8000),
+      "Api service to generation service (vLLM OpenAI-compatible API)",
+    );
+
+    const generationTaskDefinition = new ecs.Ec2TaskDefinition(this, "GenerationTaskDefinition", {
+      networkMode: ecs.NetworkMode.AWS_VPC,
+    });
+    generationTaskDefinition.addContainer("generation", {
+      image: ecs.ContainerImage.fromRegistry("vllm/vllm-openai:latest"),
+      gpuCount: 1,
+      memoryReservationMiB: 14000,
+      // Qwen3-8B per the RAG architecture doc's own recommendation.
+      // max-model-len capped at 8192 (vs. embedding's 4096) — generation
+      // prompts carry several retrieved chunks plus the question, not a
+      // single short string, so this needs more headroom; sized the same
+      // empirical way as the embedding service's own cap (real deploy
+      // verification, not guessed up front).
+      command: ["--model", "Qwen/Qwen3-8B", "--dtype", "auto", "--max-model-len", "8192"],
+      portMappings: [{ containerPort: 8000 }],
+      logging: ecs.LogDrivers.awsLogs({ streamPrefix: "edd-workbench-generation" }),
+    });
+    const generationService = new ecs.Ec2Service(this, "GenerationService", {
+      cluster,
+      serviceName: "generation",
+      taskDefinition: generationTaskDefinition,
+      desiredCount: 0,
+      capacityProviderStrategies: [{ capacityProvider: generationCapacityProvider.capacityProviderName, weight: 1 }],
+      securityGroups: [generationSecurityGroup],
+      cloudMapOptions: {
+        cloudMapNamespace: internalNamespace,
+        name: "generation",
+        dnsRecordType: servicediscovery.DnsRecordType.A,
+      },
+      circuitBreaker: { rollback: true },
+      minHealthyPercent: 0,
+    });
+
+    const generationSchedulerRole = new iam.Role(this, "GenerationSchedulerRole", {
+      assumedBy: new iam.ServicePrincipal("scheduler.amazonaws.com"),
+    });
+    generationSchedulerRole.addToPolicy(
+      new iam.PolicyStatement({ actions: ["ecs:UpdateService"], resources: [generationService.serviceArn] }),
+    );
+
+    new scheduler.CfnSchedule(this, "GenerationScheduleStart", {
+      scheduleExpression: "cron(0 7 ? * MON-FRI *)",
+      scheduleExpressionTimezone: "Europe/London",
+      flexibleTimeWindow: { mode: "OFF" },
+      target: {
+        arn: "arn:aws:scheduler:::aws-sdk:ecs:updateService",
+        roleArn: generationSchedulerRole.roleArn,
+        input: JSON.stringify({ Cluster: cluster.clusterName, Service: generationService.serviceName, DesiredCount: 1 }),
+      },
+    });
+    new scheduler.CfnSchedule(this, "GenerationScheduleStop", {
+      scheduleExpression: "cron(0 19 ? * MON-FRI *)",
+      scheduleExpressionTimezone: "Europe/London",
+      flexibleTimeWindow: { mode: "OFF" },
+      target: {
+        arn: "arn:aws:scheduler:::aws-sdk:ecs:updateService",
+        roleArn: generationSchedulerRole.roleArn,
+        input: JSON.stringify({ Cluster: cluster.clusterName, Service: generationService.serviceName, DesiredCount: 0 }),
+      },
+    });
+
+    // --- Search service (self-hosted Elasticsearch, full-text document
+    // search) --------------------------------------------------------------
+    // EC2-backed like Embedding/GenerationService above, but two deliberate
+    // differences: no GPU — a general-purpose instance is all a search
+    // index needs — and always on, no EventBridge schedule. Unlike the
+    // GPU-backed services (scheduled off specifically because GPU-hours are
+    // expensive), there's no comparable cost pressure for a small
+    // general-purpose box, and search needs to be available whenever the
+    // app is used, not just 7am-19:00 UK time.
+    //
+    // Durability: the Elasticsearch data path lives on this launch
+    // template's own EBS volume, which is NOT a stable/reattachable volume
+    // across instance replacement — a fresh ASG-launched instance gets a
+    // fresh empty volume. EFS was considered and rejected (Elastic itself
+    // discourages NFS-backed data paths — a real corruption risk, a worse
+    // trade than the problem it solves). The correct fix is Elasticsearch's
+    // own S3 snapshot repository (register searchSnapshotsBucket below via
+    // ES's Snapshot Lifecycle Management API — a manual one-time setup
+    // step, not something CDK itself can configure), with
+    // reindexSearch.ts as the recovery path for the gap since the last
+    // snapshot (cheap — it only replays already-extracted Postgres text,
+    // no re-OCR needed).
+    const searchSnapshotsBucket = new s3.Bucket(this, "SearchSnapshotsBucket", {
+      bucketName: `edd-workbench-${environmentName}-search-snapshots`,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      enforceSSL: true,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+
+    const searchInstanceSecurityGroup = new ec2.SecurityGroup(this, "SearchInstanceSecurityGroup", {
+      vpc,
+      description: "EDD Workbench search (Elasticsearch) instance - outbound only",
+      allowAllOutbound: true,
+    });
+    const searchInstanceRole = new iam.Role(this, "SearchInstanceRole", {
+      assumedBy: new iam.ServicePrincipal("ec2.amazonaws.com"),
+      managedPolicies: [
+        iam.ManagedPolicy.fromAwsManagedPolicyName("service-role/AmazonEC2ContainerServiceforEC2Role"),
+      ],
+    });
+
+    const searchLaunchTemplate = new ec2.LaunchTemplate(this, "SearchLaunchTemplate", {
+      instanceType: ec2.InstanceType.of(ec2.InstanceClass.M6I, ec2.InstanceSize.LARGE),
+      machineImage: ecs.EcsOptimizedImage.amazonLinux2(),
+      securityGroup: searchInstanceSecurityGroup,
+      role: searchInstanceRole,
+      userData: ec2.UserData.forLinux(),
+      // 100GB — resizable later if real document volume needs more; no
+      // GPU-model-weights footprint to plan around here, just the index
+      // itself.
+      blockDevices: [{ deviceName: "/dev/xvda", volume: autoscaling.BlockDeviceVolume.ebs(100) }],
+    });
+    const searchAsg = new autoscaling.AutoScalingGroup(this, "SearchAsg", {
+      vpc,
+      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      launchTemplate: searchLaunchTemplate,
+      // Always exactly 1 — no schedule flips this the way Embedding/
+      // GenerationService's own ASGs get flipped 0/1 on a business-hours
+      // cron; see this section's own top comment for why.
+      minCapacity: 1,
+      maxCapacity: 1,
+    });
+    const searchCapacityProvider = new ecs.AsgCapacityProvider(this, "SearchCapacityProvider", {
+      autoScalingGroup: searchAsg,
+      enableManagedScaling: true,
+      targetCapacityPercent: 100,
+      enableManagedTerminationProtection: false,
+    });
+    cluster.addAsgCapacityProvider(searchCapacityProvider);
+
+    const searchSecurityGroup = new ec2.SecurityGroup(this, "SearchServiceSecurityGroup", {
+      vpc,
+      description: "EDD Workbench search service (Elasticsearch) - inbound from api and worker only",
+      allowAllOutbound: true,
+    });
+    // Both need it: the api service for real search queries (search.ts),
+    // the worker for indexing writes (searchIndex.ts) and the reindex
+    // script's own bulk backfill.
+    searchSecurityGroup.addIngressRule(
+      apiService.service.connections.securityGroups[0],
+      ec2.Port.tcp(9200),
+      "Api service to search service (Elasticsearch)",
+    );
+    searchSecurityGroup.addIngressRule(
+      workerService.connections.securityGroups[0],
+      ec2.Port.tcp(9200),
+      "Worker service to search service (Elasticsearch)",
+    );
+
+    const searchTaskDefinition = new ecs.Ec2TaskDefinition(this, "SearchTaskDefinition", {
+      networkMode: ecs.NetworkMode.AWS_VPC,
+    });
+    // The Elasticsearch container's own AWS SDK calls (its S3 repository
+    // plugin, for snapshots) run under the ECS *task* role, not the EC2
+    // *instance* role above — a real 403 (AccessDenied on s3:PutObject)
+    // from a live snapshot-repo registration attempt confirmed this the
+    // hard way, not guessed. Read/write/delete/list, matching what the
+    // plugin actually needs to create, restore, and prune snapshots.
+    searchSnapshotsBucket.grantReadWrite(searchTaskDefinition.taskRole);
+    searchSnapshotsBucket.grantDelete(searchTaskDefinition.taskRole);
+    searchTaskDefinition.addContainer("search", {
+      // Official image, not a Dockerfile of our own — same "no application
+      // code to bake in" reasoning as vLLM's own image choice.
+      image: ecs.ContainerImage.fromRegistry("docker.elastic.co/elasticsearch/elasticsearch:8.15.0"),
+      // m6i.large has 8GB RAM — leave real headroom for the host OS/ECS
+      // agent rather than reserving all of it for the container, same
+      // reasoning as EmbeddingTaskDefinition's own memoryReservationMiB.
+      memoryReservationMiB: 7000,
+      environment: {
+        "discovery.type": "single-node",
+        // No app-level auth on this internal service — protected purely by
+        // the security group above, same posture as vLLM's own HTTP API
+        // (embedding/generation) already has.
+        "xpack.security.enabled": "false",
+        // Half the instance's RAM, standard Elasticsearch heap-sizing
+        // guidance (leaves the other half for the OS page cache, which
+        // Lucene relies on).
+        ES_JAVA_OPTS: "-Xms4g -Xmx4g",
+      },
+      portMappings: [{ containerPort: 9200 }],
+      logging: ecs.LogDrivers.awsLogs({ streamPrefix: "edd-workbench-search" }),
+    });
+    new ecs.Ec2Service(this, "SearchService", {
+      cluster,
+      serviceName: "search",
+      taskDefinition: searchTaskDefinition,
+      desiredCount: 1,
+      capacityProviderStrategies: [{ capacityProvider: searchCapacityProvider.capacityProviderName, weight: 1 }],
+      securityGroups: [searchSecurityGroup],
+      cloudMapOptions: {
+        cloudMapNamespace: internalNamespace,
+        name: "search",
+        dnsRecordType: servicediscovery.DnsRecordType.A,
+      },
+      circuitBreaker: { rollback: true },
+      minHealthyPercent: 0,
     });
 
     // --- One-off migration task ------------------------------------------

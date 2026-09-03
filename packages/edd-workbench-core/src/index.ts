@@ -17,8 +17,18 @@ export { extractOfficeText, type OfficeTextContent, type OfficeTextFileType } fr
 export { extractPdfTextLayer } from "./extractors/pdfText.js";
 export { resolveEmbeddableText } from "./embeddableText.js";
 export { chunkText } from "./chunking.js";
-export { embedTexts } from "./embeddingClient.js";
-export { replaceDocumentChunks, type DocumentChunkInput } from "./documentChunks.js";
+export { embedTexts, type EmbedTextsResult } from "./embeddingClient.js";
+export { generateAnswer, type ChatMessage, type GenerateAnswerResult } from "./generationClient.js";
+export { recordAiUsage, getAiUsageForUser, type AiUsageCallSite, type AiUsageBreakdown } from "./aiUsage.js";
+export {
+  indexDocument,
+  deleteDocumentFromIndex,
+  searchDocuments,
+  getIndexHealth,
+  type SearchDocument,
+  type SearchResult,
+} from "./searchClient.js";
+export { replaceDocumentChunks, toVectorLiteral, type DocumentChunkInput } from "./documentChunks.js";
 export { looksLikeRtf, looksLikeZip, looksLikeText } from "./extractors/sniff.js";
 export { iteratePstMessages, type PstMessageRecord, type PstAttachment } from "./extractors/pst.js";
 export { extractZipMembers, type ZipMember } from "./extractors/zip.js";

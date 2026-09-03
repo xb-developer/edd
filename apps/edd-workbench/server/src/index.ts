@@ -13,8 +13,12 @@ import { documentTagsRouter } from "./routes/documentTags.js";
 import { exportsRouter } from "./routes/exports.js";
 import { matterMembersRouter } from "./routes/matterMembers.js";
 import { matterAuditRouter } from "./routes/matterAudit.js";
+import { askRouter } from "./routes/ask.js";
+import { searchRouter } from "./routes/search.js";
 import { auditRouter } from "./routes/audit.js";
 import { workerStatusRouter } from "./routes/workerStatus.js";
+import { aiUsageRouter } from "./routes/aiUsage.js";
+import { searchHealthRouter } from "./routes/searchHealth.js";
 
 const PORT = process.env.EDD_WORKBENCH_SERVER_PORT ? Number(process.env.EDD_WORKBENCH_SERVER_PORT) : 4430;
 
@@ -69,6 +73,8 @@ app.get("/api/me", (req, res) => {
 
 app.use("/api/audit", auditRouter);
 app.use("/api/worker-status", workerStatusRouter);
+app.use("/api/ai-usage", aiUsageRouter);
+app.use("/api/search-health", searchHealthRouter);
 app.use("/api/matters", mattersRouter);
 // Every :matterId-scoped router below sits behind requireMatterAccess —
 // mounted once, on the shared path prefix, rather than repeated per router.
@@ -82,6 +88,8 @@ app.use("/api/matters/:matterId/document-tags", documentTagsRouter);
 app.use("/api/matters/:matterId/exports", exportsRouter);
 app.use("/api/matters/:matterId/members", matterMembersRouter);
 app.use("/api/matters/:matterId/audit-load", matterAuditRouter);
+app.use("/api/matters/:matterId/ask", askRouter);
+app.use("/api/matters/:matterId/search", searchRouter);
 
 interface HttpError {
   status?: number;

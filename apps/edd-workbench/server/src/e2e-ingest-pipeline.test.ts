@@ -69,6 +69,9 @@ describe("full ingest pipeline (end-to-end)", () => {
     // check once a document reaches 'ready' — this test drives that real
     // handler, so this queue must exist too, not just the ingest one.
     await sqsClient.send(new CreateQueueCommand({ QueueName: "edd-workbench-embedding-test" }));
+    // Same story for the search-index hand-off — unconditional for every
+    // non-container terminal state, not just 'ready'.
+    await sqsClient.send(new CreateQueueCommand({ QueueName: "edd-workbench-search-index-test" }));
     await sqsClient.send(new PurgeQueueCommand({ QueueUrl: INGEST_QUEUE_URL })).catch(() => {});
 
     orgId = `org_test_${randomUUID()}`;

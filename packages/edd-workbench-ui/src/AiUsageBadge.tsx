@@ -15,7 +15,7 @@ const POLL_INTERVAL_MS = 15_000;
  * Every user's own running AI token usage in the topbar (see
  * EddWorkbenchWorkspace.tsx) — GET /api/ai-usage/me, which is scoped to
  * the caller by req.eddContext server-side, so there's no per-user access
- * check needed here the way WorkerHealthBar needs an admin gate.
+ * check needed here (WorkerHealthBar likewise needs no role gate).
  */
 export function AiUsageBadge({ api }: AiUsageBadgeProps) {
   const [usage, setUsage] = useState<AiUsageDTO | null>(null);

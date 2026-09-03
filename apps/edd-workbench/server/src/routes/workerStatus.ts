@@ -4,8 +4,9 @@ import { getWorkerHeartbeats, sqsClient } from "@xbundle/edd-workbench-core";
 
 // Mounted at /api/worker-status — cross-org infra visibility (queue depth,
 // worker liveness), not tenant/matter data, so there's no org/matter scope
-// to check here beyond "is this caller an admin." The Processing Status
-// panel (client) polls this for its live worker-health bar.
+// to check here; any authenticated caller may view it (queue depth/heartbeat
+// carry no tenant data). The Processing Status panel (client) polls this
+// for its live worker-health bar.
 export const workerStatusRouter = Router();
 
 const QUEUES: { name: string; url: string | undefined }[] = [
@@ -13,13 +14,8 @@ const QUEUES: { name: string; url: string | undefined }[] = [
   { name: "export", url: process.env.EDD_WORKBENCH_EXPORT_QUEUE_URL },
 ];
 
-workerStatusRouter.get("/", async (req, res, next) => {
+workerStatusRouter.get("/", async (_req, res, next) => {
   try {
-    if (req.eddContext!.role !== "admin") {
-      res.status(403).json({ error: "Admin access required" });
-      return;
-    }
-
     const [heartbeats, approximateMessages] = await Promise.all([
       getWorkerHeartbeats(),
       Promise.all(

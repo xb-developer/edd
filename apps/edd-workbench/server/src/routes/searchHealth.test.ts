@@ -29,15 +29,16 @@ describe("searchHealthRouter", () => {
     delete process.env.ELASTICSEARCH_SERVICE_URL;
   });
 
-  it("403s for a non-admin caller, without ever calling Elasticsearch", async () => {
-    const fetchSpy = vi.fn();
-    vi.stubGlobal("fetch", fetchSpy);
+  it("returns the calling user's own org's ES doc count alongside its Postgres ready/failed count, for a non-admin caller too", async () => {
+    process.env.ELASTICSEARCH_SERVICE_URL = "http://search.internal:9200";
+    const orgId = `org_${randomUUID()}`;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ count: 7 }) }));
 
-    const app = buildTestApp(context(`org_${randomUUID()}`, "reviewer"));
+    const app = buildTestApp(context(orgId, "reviewer"));
     const res = await request(app).get("/api/search-health");
 
-    expect(res.status).toBe(403);
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ esDocCount: 7, postgresDocCount: 0 });
   });
 
   it("returns the calling admin's own org's ES doc count alongside its Postgres ready/failed count", async () => {

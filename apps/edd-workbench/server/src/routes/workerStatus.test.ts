@@ -50,10 +50,19 @@ describe("workerStatusRouter", () => {
     await deleteHeartbeatRows(["ingest", "export"]);
   });
 
-  it("403s for a non-admin caller, without touching the DB or SQS", async () => {
+  it("returns each configured queue's heartbeat and live SQS depth for a non-admin caller too", async () => {
+    process.env.EDD_WORKBENCH_INGEST_QUEUE_URL = "http://localhost:9324/queue/edd-workbench-ingest-test";
+    process.env.EDD_WORKBENCH_EXPORT_QUEUE_URL = "http://localhost:9324/queue/edd-workbench-export-test";
+    await sqsClient.send(new CreateQueueCommand({ QueueName: "edd-workbench-ingest-test" }));
+    await sqsClient.send(new CreateQueueCommand({ QueueName: "edd-workbench-export-test" }));
+    await sqsClient.send(new PurgeQueueCommand({ QueueUrl: process.env.EDD_WORKBENCH_INGEST_QUEUE_URL })).catch(() => {});
+    await sqsClient.send(new PurgeQueueCommand({ QueueUrl: process.env.EDD_WORKBENCH_EXPORT_QUEUE_URL })).catch(() => {});
+
     const app = buildTestApp(context("reviewer"));
     const res = await request(app).get("/api/worker-status");
-    expect(res.status).toBe(403);
+
+    expect(res.status).toBe(200);
+    expect(res.body.queues.find((q: { name: string }) => q.name === "ingest")).toBeDefined();
   });
 
   it("returns each configured queue's heartbeat and live SQS depth for an admin caller", async () => {

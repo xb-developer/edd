@@ -235,7 +235,7 @@ export function EddWorkbenchWorkspace({ apiBaseUrl = "http://localhost:4430/api"
             </h1>
           )}
         </div>
-        {me?.role === "admin" && <WorkerHealthBar api={api} />}
+        <WorkerHealthBar api={api} />
         <AiUsageBadge api={api} />
         {onLogout && (
           <button type="button" className="topbar-btn" onClick={handleLogout}>

@@ -26,11 +26,11 @@ function secondsAgo(iso: string | null): number | null {
 }
 
 /**
- * Admin-only live worker status in the topbar (see EddWorkbenchWorkspace.tsx) —
- * the Processing Status panel's "worker health bar" from the POC, ported as
- * a persistent indicator rather than a togglable panel, since it's cheap
- * enough to just always show for an admin. Polls GET /api/worker-status
- * (403s for non-admins, so this component is only ever mounted for one).
+ * Live worker status in the topbar (see EddWorkbenchWorkspace.tsx) — the
+ * Processing Status panel's "worker health bar" from the POC, ported as a
+ * persistent indicator rather than a togglable panel, since it's cheap
+ * enough to just always show. Polls GET /api/worker-status, available to
+ * any authenticated caller.
  */
 export function WorkerHealthBar({ api }: WorkerHealthBarProps) {
   const [status, setStatus] = useState<WorkerStatusDTO | null>(null);

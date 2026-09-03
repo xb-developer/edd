@@ -166,7 +166,7 @@ export function createApiClient(baseUrl: string, getAccessToken: () => Promise<s
     /** Best-effort, called right before the actual Auth0 logout redirect — never let a failure here block logout. */
     recordLogout: () => request<void>("/audit/logout", { method: "POST" }),
 
-    /** Admin-only server-side (403 otherwise) — live queue depth plus each queue's own worker heartbeat, backing the topbar's WorkerHealthBar. */
+    /** Live queue depth plus each queue's own worker heartbeat, backing the topbar's WorkerHealthBar. Available to any authenticated caller. */
     getWorkerStatus: () => request<WorkerStatusDTO>("/worker-status"),
 
     /** May take several seconds (embeds the question, does a similarity search, then a real generation call) and 503s outside the self-hosted GPU services' business-hours schedule — see ask.ts. */
@@ -183,7 +183,7 @@ export function createApiClient(baseUrl: string, getAccessToken: () => Promise<s
     searchDocuments: (matterId: string, query: string) =>
       request<SearchResultDTO>(`/matters/${matterId}/search?q=${encodeURIComponent(query)}`),
 
-    /** Admin-only server-side (403 otherwise) — backs the topbar's WorkerHealthBar search-index chip. */
+    /** Backs the topbar's WorkerHealthBar search-index chip. Available to any authenticated caller, scoped to their own org. */
     getSearchHealth: () => request<SearchHealthDTO>("/search-health"),
   };
 }

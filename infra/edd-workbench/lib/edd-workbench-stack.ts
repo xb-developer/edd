@@ -177,13 +177,14 @@ export class EddWorkbenchStack extends cdk.Stack {
     });
 
     // A separate queue/service from ingest, deliberately — the whole point
-    // is that a slow OCR job (Amazon Textract's async job can take tens of
+    // is that a slow OCR job (rasterizing a multi-page scanned pdf, then
+    // running it through the native Tesseract engine, can take tens of
     // seconds to a few minutes) must never block the shared ingest queue's
     // fast eml/docx/etc extractors sitting behind it in line. Visibility
-    // timeout covers the ocr-service's own worst-case polling window
-    // (~5 minutes, see apps/edd-workbench/ocr-service/src/textract.ts)
-    // with real margin, same "outlast the worst realistic job" reasoning
-    // as the export queue above.
+    // timeout covers the ocr-service's own worst-case job timeout (~5
+    // minutes, see apps/edd-workbench/ocr-service/src/tesseract.ts's
+    // OCR_TIMEOUT_MS) with real margin, same "outlast the worst realistic
+    // job" reasoning as the export queue above.
     const ocrDlq = new sqs.Queue(this, "OcrDlq", { queueName: `edd-workbench-${environmentName}-ocr-dlq` });
     const ocrQueue = new sqs.Queue(this, "OcrQueue", {
       queueName: `edd-workbench-${environmentName}-ocr`,
@@ -457,14 +458,22 @@ export class EddWorkbenchStack extends cdk.Stack {
     // its own queue — see ocrQueue's own comment for why this can't just be
     // a third consumeQueue loop bolted onto the worker process. Exposes a
     // small REST API too (POST /ocr, GET /health) — the stable, engine-
-    // agnostic OCR contract (currently backed by Amazon Textract; swappable
-    // later without touching ingest.ts or this queue's consumer at all) —
-    // but that's not behind the ALB/CloudFront: nothing outside the VPC
-    // needs to call it directly today, only the queue-driven path in
-    // production. See apps/edd-workbench/ocr-service for the actual code.
+    // agnostic OCR contract (currently backed by a native Tesseract engine
+    // running in-container; swappable later without touching ingest.ts or
+    // this queue's consumer at all) — but that's not behind the ALB/
+    // CloudFront: nothing outside the VPC needs to call it directly today,
+    // only the queue-driven path in production. See
+    // apps/edd-workbench/ocr-service for the actual code.
+    //
+    // Sized for real CPU-bound work, not the old Textract-polling task's
+    // small "mostly idle, waiting on an async AWS job" footprint — this
+    // task now does the actual page rasterization (pdftoppm) and OCR
+    // (tesseract) computation itself. 2 vCPU / 4GB is a starting point for
+    // typical scanned-document page counts; revisit if real usage shows
+    // OOM kills or OCR_TIMEOUT_MS timeouts on larger documents.
     const ocrTaskDefinition = new ecs.FargateTaskDefinition(this, "OcrTaskDefinition", {
-      cpu: 512,
-      memoryLimitMiB: 1024,
+      cpu: 2048,
+      memoryLimitMiB: 4096,
     });
     ocrTaskDefinition.addContainer("ocr", {
       image: ecs.ContainerImage.fromAsset("../..", {
@@ -503,17 +512,16 @@ export class EddWorkbenchStack extends cdk.Stack {
     // artifacts back to S3, only a DB row (its extracted text/status).
     documentsBucket.grantRead(ocrTaskDefinition.taskRole);
     database.connections.allowDefaultPortFrom(ocrService, "OCR service to RDS");
-    // Textract's Start/GetDocumentTextDetection don't support resource-level
-    // ARN scoping — "*" is the documented/only option for these actions.
-    ocrTaskDefinition.taskRole.addToPrincipalPolicy(
-      new iam.PolicyStatement({
-        actions: ["textract:StartDocumentTextDetection", "textract:GetDocumentTextDetection"],
-        resources: ["*"],
-      }),
-    );
 
-    // Same "scale on backlog depth, not CPU" reasoning as the worker above
-    // — OCR is I/O-bound waiting on Textract, not CPU-bound.
+    // Backlog depth, not CPU utilization, is still the right scaling signal
+    // even though OCR is now CPU-bound work (rasterize + recognize) rather
+    // than I/O-bound waiting on Textract: consumeQueue processes one
+    // message at a time per task (see queues.ts), so a single task's CPU
+    // sits near 100% whenever it's processing any one job at all, whether
+    // the backlog is 1 message or 50 — that makes CPU utilization a noisy,
+    // not-actually-proportional signal here. Backlog depth directly answers
+    // the question that matters — "how many jobs are waiting?" — so it
+    // stays the metric; only the per-task cpu/memory above needed to grow.
     const ocrScaling = ocrService.autoScaleTaskCount({ minCapacity: 1, maxCapacity: 5 });
     ocrScaling.scaleOnMetric("ScaleOnOcrBacklog", {
       metric: ocrQueue.metricApproximateNumberOfMessagesVisible(),

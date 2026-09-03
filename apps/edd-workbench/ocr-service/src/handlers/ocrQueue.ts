@@ -1,6 +1,6 @@
 import { SendMessageCommand } from "@aws-sdk/client-sqs";
 import { withOrgSession, sqsClient, DOCUMENTS_BUCKET } from "@xbundle/edd-workbench-core";
-import { extractTextViaTextract } from "../textract.js";
+import { extractTextViaOcr } from "../tesseract.js";
 
 // Read at module-load time, matching the pattern ingest.ts/containerExpansion.ts
 // already use for their own required queue-URL env vars.
@@ -18,11 +18,12 @@ if (!SEARCH_INDEX_QUEUE_URL) {
  * ingest.ts's hand-off for what enqueues these (a pdf with no real text
  * layer, or an image/tiff). Deliberately does NOT hold one DB transaction
  * open across the whole OCR call the way ingest.ts's own handler does for
- * its (sub-second) extractors: Textract's job can legitimately take tens
- * of seconds to a few minutes, and holding a checked-out pool connection
- * idle-in-transaction for that long is a real cost ingest.ts's fast
- * extractors never had to worry about. Instead: a short read, the slow
- * OCR call with no open transaction, then a short write.
+ * its (sub-second) extractors: a multi-page rasterize-then-recognize job
+ * can legitimately take tens of seconds to a few minutes, and holding a
+ * checked-out pool connection idle-in-transaction for that long is a real
+ * cost ingest.ts's fast extractors never had to worry about. Instead: a
+ * short read, the slow OCR call with no open transaction, then a short
+ * write.
  */
 export async function handleOcrMessage(body: string): Promise<void> {
   const { documentId, orgId } = JSON.parse(body) as { documentId: string; orgId: string };
@@ -37,7 +38,7 @@ export async function handleOcrMessage(body: string): Promise<void> {
   if (!s3Key) return;
 
   try {
-    const text = await extractTextViaTextract({ bucket: DOCUMENTS_BUCKET, key: s3Key });
+    const text = await extractTextViaOcr({ bucket: DOCUMENTS_BUCKET, key: s3Key });
     await withOrgSession(orgId, (client) =>
       client.query("UPDATE documents SET metadata = $1, ingest_status = 'ready' WHERE id = $2", [JSON.stringify({ text }), documentId]),
     );

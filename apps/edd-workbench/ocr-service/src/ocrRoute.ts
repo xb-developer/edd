@@ -1,11 +1,11 @@
 import { Router } from "express";
-import { extractTextViaTextract } from "./textract.js";
+import { extractTextViaOcr } from "./tesseract.js";
 
 /**
  * The stable, engine-agnostic OCR contract — deliberately knows nothing
  * about documents/orgId/matters, only "OCR this S3 object." The queue
  * handler (ocrQueue.ts, this service's real, primary entry point in
- * production) calls extractTextViaTextract directly, not over HTTP — this
+ * production) calls extractTextViaOcr directly, not over HTTP — this
  * route exists so the OCR capability itself is independently reachable/
  * testable/reusable without going through the ingest pipeline at all.
  *
@@ -23,7 +23,7 @@ ocrRouter.post("/", async (req, res, next) => {
       res.status(400).json({ error: "s3Bucket and s3Key are required" });
       return;
     }
-    const text = await extractTextViaTextract({ bucket: s3Bucket, key: s3Key });
+    const text = await extractTextViaOcr({ bucket: s3Bucket, key: s3Key });
     res.json({ text });
   } catch (err) {
     next(err);

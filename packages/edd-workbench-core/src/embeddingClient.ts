@@ -28,11 +28,12 @@ export interface EmbedTextsResult {
 
 /**
  * Calls vLLM's own OpenAI-compatible /v1/embeddings endpoint directly —
- * deliberately no wrapper service of our own around it (unlike
- * ocr-service's REST facade around Textract's more awkward async-job SDK
- * shape): vLLM's API already IS the stable, swappable contract here.
- * Swapping the underlying model/engine later means changing only this
- * file's request shape, not any caller.
+ * deliberately no wrapper service of our own around it (unlike ocr-service,
+ * which exists as its own deployable specifically because native OCR
+ * binaries and their CPU/memory profile don't belong bolted onto this
+ * worker process): vLLM's API already IS the stable, swappable contract
+ * here. Swapping the underlying model/engine later means changing only
+ * this file's request shape, not any caller.
  *
  * Reads EMBEDDING_SERVICE_URL lazily (not at module load) — this module
  * is imported by things that don't necessarily call it (e.g. tests of

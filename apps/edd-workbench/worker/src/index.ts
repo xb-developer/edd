@@ -39,8 +39,10 @@ process.on("SIGTERM", () => {
 // alongside ingest/export rather than as its own service (unlike OCR):
 // it calls the self-hosted embedding server's own OpenAI-compatible API
 // directly (see embeddingClient.ts), with no wrapper service of our own
-// to justify separate deployment/scaling infrastructure the way OCR's
-// Textract-specific REST facade did.
+// to justify separate deployment/scaling infrastructure the way OCR's own
+// CPU-bound rasterize-then-recognize work (needing its own container's
+// worth of native binaries and resource sizing — see ocr-service's
+// Dockerfile/tesseract.ts) did.
 await Promise.all([
   consumeQueue(INGEST_QUEUE_URL, "ingest", handleIngestMessage, shutdownController.signal),
   consumeQueue(EXPORT_QUEUE_URL, "export", handleExportMessage, shutdownController.signal),

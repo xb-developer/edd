@@ -9,6 +9,13 @@ RUN npm install
 
 FROM node:22-slim
 WORKDIR /repo
+# OCR runs entirely in this container via the real Tesseract engine (not
+# tesseract.js's WASM build) — tesseract-ocr is the engine + English
+# trained data, poppler-utils supplies pdftoppm to rasterize PDF pages
+# into images first (Tesseract only reads raster images, not PDFs). See
+# tesseract.ts for the only code that shells out to these.
+RUN apt-get update && apt-get install -y --no-install-recommends tesseract-ocr poppler-utils \
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=build /repo/node_modules ./node_modules
 COPY --from=build /repo/package.json ./package.json
 COPY --from=build /repo/packages ./packages

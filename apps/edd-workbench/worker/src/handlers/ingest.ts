@@ -253,10 +253,11 @@ export async function handleIngestMessage(body: string): Promise<void> {
         } else {
           // No real text layer (a scanned pdf, or any image/tiff) — hand
           // off to the OCR service's own queue rather than OCR-ing here
-          // in-process. OCR can take tens of seconds to minutes (Amazon
-          // Textract under the hood); this shared ingest queue must never
-          // be blocked behind one slow job. Stays 'processing' until the
-          // OCR service's own handler marks it 'ready'/'failed'.
+          // in-process. OCR can take tens of seconds to minutes (rasterizing
+          // a multi-page scan, then running it through Tesseract); this
+          // shared ingest queue must never be blocked behind one slow job.
+          // Stays 'processing' until the OCR service's own handler marks it
+          // 'ready'/'failed'.
           await sqsClient.send(new SendMessageCommand({ QueueUrl: OCR_QUEUE_URL, MessageBody: JSON.stringify({ documentId, orgId }) }));
           await client.query("UPDATE documents SET ingest_status = 'processing' WHERE id = $1", [documentId]);
           reachedReady = false;

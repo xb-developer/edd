@@ -1,9 +1,15 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { CreateQueueCommand } from "@aws-sdk/client-sqs";
-import { withOrgSession, initMatterGuidCounter, sqsClient } from "@xbundle/edd-workbench-core";
-import { textractClient } from "../textract.js";
+import { PutObjectCommand, CreateBucketCommand, HeadBucketCommand } from "@aws-sdk/client-s3";
+import { withOrgSession, initMatterGuidCounter, sqsClient, s3Client, DOCUMENTS_BUCKET } from "@xbundle/edd-workbench-core";
 import { handleOcrMessage } from "./ocrQueue.js";
+
+const FIXTURES_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "__fixtures__");
+const FIXTURE_PNG = readFileSync(join(FIXTURES_DIR, "scan.png")); // synthetic — see __fixtures__/NOTICE.md
 
 // Explicit, not relying on some other test file's own beforeAll happening
 // to run first — a successful OCR now unconditionally enqueues an
@@ -18,6 +24,14 @@ beforeAll(async () => {
 
 async function deleteTestOrg(orgId: string): Promise<void> {
   await withOrgSession(orgId, (client) => client.query("DELETE FROM matters WHERE org_id = $1", [orgId]));
+}
+
+async function ensureBucket(): Promise<void> {
+  try {
+    await s3Client.send(new HeadBucketCommand({ Bucket: DOCUMENTS_BUCKET }));
+  } catch {
+    await s3Client.send(new CreateBucketCommand({ Bucket: DOCUMENTS_BUCKET }));
+  }
 }
 
 async function createTestOrgMatterDocument(s3Key: string | null): Promise<{ orgId: string; documentId: string }> {
@@ -49,42 +63,33 @@ async function getDocument(orgId: string, documentId: string) {
 }
 
 describe("handleOcrMessage", () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
   it("writes the extracted text and marks the document ready on success", async () => {
-    const { orgId, documentId } = await createTestOrgMatterDocument("tenants/test/documents/x/original.pdf");
+    await ensureBucket();
+    const s3Key = `tenants/test/ocr/${randomUUID()}`;
+    await s3Client.send(new PutObjectCommand({ Bucket: DOCUMENTS_BUCKET, Key: s3Key, Body: FIXTURE_PNG }));
+    const { orgId, documentId } = await createTestOrgMatterDocument(s3Key);
     try {
-      let call = 0;
-      const responses = [
-        { JobId: "job-1" },
-        { JobStatus: "SUCCEEDED", Blocks: [{ BlockType: "LINE", Text: "Scanned page text" }] },
-      ];
-      vi.spyOn(textractClient, "send").mockImplementation(async () => responses[call++] as never);
-
       await handleOcrMessage(JSON.stringify({ documentId, orgId }));
 
       const doc = await getDocument(orgId, documentId);
       expect(doc.ingest_status).toBe("ready");
-      expect(doc.metadata).toEqual({ text: "Scanned page text" });
+      expect(doc.metadata).toEqual({ text: "OCR REGRESSION TEST 482915" });
     } finally {
       await deleteTestOrg(orgId);
     }
   });
 
-  it("marks the document failed, with Textract's own error recorded, when the job fails", async () => {
-    const { orgId, documentId } = await createTestOrgMatterDocument("tenants/test/documents/y/original.pdf");
+  it("marks the document failed, with the OCR engine's own error recorded, when the object isn't a real image", async () => {
+    await ensureBucket();
+    const s3Key = `tenants/test/ocr/${randomUUID()}`;
+    await s3Client.send(new PutObjectCommand({ Bucket: DOCUMENTS_BUCKET, Key: s3Key, Body: Buffer.from("this is not an image") }));
+    const { orgId, documentId } = await createTestOrgMatterDocument(s3Key);
     try {
-      let call = 0;
-      const responses = [{ JobId: "job-2" }, { JobStatus: "FAILED", StatusMessage: "Unsupported document format" }];
-      vi.spyOn(textractClient, "send").mockImplementation(async () => responses[call++] as never);
-
       await handleOcrMessage(JSON.stringify({ documentId, orgId }));
 
       const doc = await getDocument(orgId, documentId);
       expect(doc.ingest_status).toBe("failed");
-      expect(doc.ingest_error).toBe("Unsupported document format");
+      expect(doc.ingest_error).toMatch(/cannot be read|error/i);
     } finally {
       await deleteTestOrg(orgId);
     }
@@ -94,8 +99,6 @@ describe("handleOcrMessage", () => {
     const { orgId, documentId } = await createTestOrgMatterDocument("tenants/test/documents/z/original.pdf");
     await deleteTestOrg(orgId); // gone before the handler ever runs
 
-    const send = vi.spyOn(textractClient, "send");
     await expect(handleOcrMessage(JSON.stringify({ documentId, orgId }))).resolves.toBeUndefined();
-    expect(send).not.toHaveBeenCalled();
   });
 });

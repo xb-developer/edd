@@ -1,7 +1,12 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { randomUUID } from "node:crypto";
 import express from "express";
 import request from "supertest";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { textractClient } from "./textract.js";
+import { describe, expect, it } from "vitest";
+import { PutObjectCommand, CreateBucketCommand, HeadBucketCommand } from "@aws-sdk/client-s3";
+import { s3Client, DOCUMENTS_BUCKET } from "@xbundle/edd-workbench-core";
 import { ocrRouter } from "./ocrRoute.js";
 
 // Mounts only the router — no listen()/queue-consumer side effects, same
@@ -17,41 +22,40 @@ function buildTestApp() {
   return app;
 }
 
-describe("POST /ocr", () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
+const FIXTURES_DIR = join(dirname(fileURLToPath(import.meta.url)), "__fixtures__");
+const FIXTURE_PNG = readFileSync(join(FIXTURES_DIR, "scan.png")); // synthetic — see __fixtures__/NOTICE.md
 
+async function ensureBucket(): Promise<void> {
+  try {
+    await s3Client.send(new HeadBucketCommand({ Bucket: DOCUMENTS_BUCKET }));
+  } catch {
+    await s3Client.send(new CreateBucketCommand({ Bucket: DOCUMENTS_BUCKET }));
+  }
+}
+
+describe("POST /ocr", () => {
   it("400s when s3Bucket or s3Key is missing", async () => {
     const app = buildTestApp();
     const res = await request(app).post("/ocr").send({ s3Key: "only-a-key" });
     expect(res.status).toBe(400);
   });
 
-  it("returns the extracted text for a real bucket/key, calling Textract with exactly that location", async () => {
-    let call = 0;
-    const responses = [{ JobId: "job-1" }, { JobStatus: "SUCCEEDED", Blocks: [{ BlockType: "LINE", Text: "Routed text" }] }];
-    const send = vi.spyOn(textractClient, "send").mockImplementation(async () => responses[call++] as never);
+  it("returns the extracted text for a real bucket/key, routed through the real Tesseract engine", async () => {
+    await ensureBucket();
+    const key = `tenants/test/ocr/${randomUUID()}`;
+    await s3Client.send(new PutObjectCommand({ Bucket: DOCUMENTS_BUCKET, Key: key, Body: FIXTURE_PNG }));
 
     const app = buildTestApp();
-    const res = await request(app).post("/ocr").send({ s3Bucket: "my-bucket", s3Key: "docs/a.pdf" });
+    const res = await request(app).post("/ocr").send({ s3Bucket: DOCUMENTS_BUCKET, s3Key: key });
 
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ text: "Routed text" });
-    expect(send.mock.calls[0][0].input).toEqual({
-      DocumentLocation: { S3Object: { Bucket: "my-bucket", Name: "docs/a.pdf" } },
-    });
+    expect(res.body.text).toContain("OCR REGRESSION TEST 482915");
   });
 
-  it("500s with the underlying error surfaced when Textract itself fails", async () => {
-    let call = 0;
-    const responses = [{ JobId: "job-2" }, { JobStatus: "FAILED", StatusMessage: "Unsupported document format" }];
-    vi.spyOn(textractClient, "send").mockImplementation(async () => responses[call++] as never);
-
+  it("500s with a clear error when the referenced object doesn't exist", async () => {
     const app = buildTestApp();
-    const res = await request(app).post("/ocr").send({ s3Bucket: "b", s3Key: "k" });
+    const res = await request(app).post("/ocr").send({ s3Bucket: DOCUMENTS_BUCKET, s3Key: `tenants/test/ocr/${randomUUID()}` });
 
     expect(res.status).toBe(500);
-    expect(res.body.error).toBe("Unsupported document format");
   });
 });

@@ -5,7 +5,11 @@ import type { TagSetDTO, MatterMemberDTO, MatterMemberCandidateDTO, DocumentDTO,
 import { ExportButtons } from "./ExportButtons";
 import { RetryIngestButton } from "./RetryIngestButton";
 
-export type IngestStatusFilter = DocumentDTO["ingestStatus"] | "all";
+// "ocr" is a genuinely different axis from the ingestStatus values above it
+// (see DocumentDTO.ocrStatus / migration 029) — it selects documents whose
+// OCR actually completed (ocrStatus === "ready"), regardless of their
+// overall ingestStatus, rather than being one more ingestStatus value.
+export type IngestStatusFilter = DocumentDTO["ingestStatus"] | "all" | "ocr";
 
 const STATUS_FILTER_OPTIONS: { value: IngestStatusFilter; label: string }[] = [
   { value: "all", label: "All" },
@@ -13,6 +17,7 @@ const STATUS_FILTER_OPTIONS: { value: IngestStatusFilter; label: string }[] = [
   { value: "processing", label: "Processing" },
   { value: "ready", label: "Ready" },
   { value: "failed", label: "Failed" },
+  { value: "ocr", label: "OCR" },
 ];
 
 export interface FilterPanelProps {
@@ -83,7 +88,8 @@ export function FilterPanel({
 }: FilterPanelProps) {
   const allTags = tagSets.flatMap((tagSet) => tagSet.tags);
   const countForTag = (tagId: string) => Object.values(appliedTagsByDocument).filter((tagIds) => tagIds.includes(tagId)).length;
-  const countForStatus = (status: DocumentDTO["ingestStatus"]) => documents.filter((d) => d.ingestStatus === status).length;
+  const countForStatus = (status: Exclude<IngestStatusFilter, "all">) =>
+    status === "ocr" ? documents.filter((d) => d.ocrStatus === "ready").length : documents.filter((d) => d.ingestStatus === status).length;
   // Retry only ever sends genuinely-failed ids — a broader multi-select
   // (e.g. spanning failed + ready) silently narrows to just the failed
   // ones rather than 400ing the whole request, since the server enforces

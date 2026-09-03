@@ -73,6 +73,7 @@ describe("handleOcrMessage", () => {
 
       const doc = await getDocument(orgId, documentId);
       expect(doc.ingest_status).toBe("ready");
+      expect(doc.ocr_status).toBe("ready");
       expect(doc.metadata).toEqual({ text: "OCR REGRESSION TEST 482915" });
     } finally {
       await deleteTestOrg(orgId);
@@ -89,6 +90,7 @@ describe("handleOcrMessage", () => {
 
       const doc = await getDocument(orgId, documentId);
       expect(doc.ingest_status).toBe("failed");
+      expect(doc.ocr_status).toBe("failed");
       expect(doc.ingest_error).toMatch(/cannot be read|error/i);
     } finally {
       await deleteTestOrg(orgId);

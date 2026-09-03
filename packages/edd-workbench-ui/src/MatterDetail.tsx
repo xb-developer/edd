@@ -381,7 +381,11 @@ export function MatterDetail({ api, matterId, canManageAccess }: MatterDetailPro
       if (!matchesSearch) return false;
       const matchesAsk = askRelevantDocumentIds === null || askRelevantDocumentIds.has(doc.documentId);
       if (!matchesAsk) return false;
-      if (statusFilter !== "all" && doc.ingestStatus !== statusFilter) return false;
+      if (statusFilter === "ocr") {
+        if (doc.ocrStatus !== "ready") return false;
+      } else if (statusFilter !== "all" && doc.ingestStatus !== statusFilter) {
+        return false;
+      }
       if (selectedTagIds.length === 0) return true;
       const appliedIds = appliedTagsByDocument[doc.documentId] ?? [];
       return tagMatchMode === "all" ? selectedTagIds.every((id) => appliedIds.includes(id)) : selectedTagIds.some((id) => appliedIds.includes(id));

@@ -40,7 +40,10 @@ export async function handleOcrMessage(body: string): Promise<void> {
   try {
     const text = await extractTextViaOcr({ bucket: DOCUMENTS_BUCKET, key: s3Key });
     await withOrgSession(orgId, (client) =>
-      client.query("UPDATE documents SET metadata = $1, ingest_status = 'ready' WHERE id = $2", [JSON.stringify({ text }), documentId]),
+      client.query("UPDATE documents SET metadata = $1, ingest_status = 'ready', ocr_status = 'ready' WHERE id = $2", [
+        JSON.stringify({ text }),
+        documentId,
+      ]),
     );
     // Mirrors ingest.ts's own hand-off — OCR reaching a final 'ready'
     // outcome is exactly the same trigger point for embedding eligibility
@@ -57,7 +60,10 @@ export async function handleOcrMessage(body: string): Promise<void> {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await withOrgSession(orgId, (client) =>
-      client.query("UPDATE documents SET ingest_status = 'failed', ingest_error = $1 WHERE id = $2", [message, documentId]),
+      client.query("UPDATE documents SET ingest_status = 'failed', ocr_status = 'failed', ingest_error = $1 WHERE id = $2", [
+        message,
+        documentId,
+      ]),
     );
     // A failed OCR is still a terminal state for search purposes — the
     // document must remain filename-searchable (matching today's

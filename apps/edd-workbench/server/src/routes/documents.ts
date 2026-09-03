@@ -57,6 +57,7 @@ interface DocumentRow {
   content_type_detected: string;
   ingest_status: string;
   ingest_error: string | null;
+  ocr_status: string;
   title: string | null;
   author: string | null;
   subject: string | null;
@@ -106,6 +107,7 @@ function toDocumentDTO(row: DocumentRow) {
     contentTypeDetected: row.content_type_detected,
     ingestStatus: row.ingest_status,
     ingestError: row.ingest_error,
+    ocrStatus: row.ocr_status,
     title: row.title,
     author: row.author,
     subject: row.subject,

@@ -915,6 +915,10 @@ describe("handleIngestMessage", () => {
 
     expect(doc.ingest_status).toBe("ready");
     expect(doc.metadata).toEqual({ text: "Real embedded text" });
+    // A real text layer means this document never went through OCR at
+    // all — ocr_status stays at its default, distinct from the OCR
+    // hand-off tests below even though both reach ingest_status='ready'.
+    expect(doc.ocr_status).toBe("excluded");
   });
 
   it("hands a text-layer-less pdf (a stand-in for a scanned page) off to the ocr queue instead of marking it ready", async () => {
@@ -936,6 +940,10 @@ describe("handleIngestMessage", () => {
     // handler resolves it one way or the other.
     expect(doc.ingest_status).toBe("processing");
     expect(doc.metadata).toBeNull();
+    // Tracks that this document DID require OCR — its own axis from
+    // ingest_status (see migration 029), so it survives even once
+    // ingest_status later moves on to 'ready'/'failed'.
+    expect(doc.ocr_status).toBe("processing");
 
     const { Messages } = await sqsClient.send(
       new ReceiveMessageCommand({ QueueUrl: ocrQueueUrl, WaitTimeSeconds: 2, MaxNumberOfMessages: 1 }),
@@ -959,6 +967,7 @@ describe("handleIngestMessage", () => {
     const doc = await getDocument(orgId, documentId);
 
     expect(doc.ingest_status).toBe("processing");
+    expect(doc.ocr_status).toBe("processing");
 
     const { Messages } = await sqsClient.send(
       new ReceiveMessageCommand({ QueueUrl: ocrQueueUrl, WaitTimeSeconds: 2, MaxNumberOfMessages: 1 }),

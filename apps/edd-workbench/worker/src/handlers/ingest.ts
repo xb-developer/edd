@@ -257,9 +257,12 @@ export async function handleIngestMessage(body: string): Promise<void> {
           // a multi-page scan, then running it through Tesseract); this
           // shared ingest queue must never be blocked behind one slow job.
           // Stays 'processing' until the OCR service's own handler marks it
-          // 'ready'/'failed'.
+          // 'ready'/'failed'. ocr_status flips to 'processing' here too —
+          // its own axis from ingest_status (see migration 029's comment),
+          // tracking specifically whether THIS document ever needed OCR at
+          // all, not just its overall ingest progress.
           await sqsClient.send(new SendMessageCommand({ QueueUrl: OCR_QUEUE_URL, MessageBody: JSON.stringify({ documentId, orgId }) }));
-          await client.query("UPDATE documents SET ingest_status = 'processing' WHERE id = $1", [documentId]);
+          await client.query("UPDATE documents SET ingest_status = 'processing', ocr_status = 'processing' WHERE id = $1", [documentId]);
           reachedReady = false;
         }
       } else {

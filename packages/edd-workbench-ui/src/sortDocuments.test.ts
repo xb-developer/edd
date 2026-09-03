@@ -16,6 +16,7 @@ function doc(overrides: Partial<DocumentDTO>): DocumentDTO {
     contentTypeDetected: "text",
     ingestStatus: "ready",
     ingestError: null,
+    ocrStatus: "excluded",
     title: null,
     author: null,
     subject: null,

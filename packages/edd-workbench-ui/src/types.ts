@@ -71,6 +71,8 @@ export interface DocumentDTO {
   contentTypeDetected: string;
   ingestStatus: "pending" | "processing" | "ready" | "failed";
   ingestError: string | null;
+  /** Its own axis from ingestStatus (see migration 029) — "excluded" for every document whose content type never goes through OCR at all (docx, eml, a pdf with a real text layer, ...); "processing"/"ready"/"failed" only for documents that were actually handed off to the OCR service. Powers the "OCR" Processing Filter option, which selects "ready" specifically. */
+  ocrStatus: "excluded" | "processing" | "ready" | "failed";
   title: string | null;
   author: string | null;
   subject: string | null;

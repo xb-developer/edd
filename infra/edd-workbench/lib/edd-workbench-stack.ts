@@ -933,8 +933,10 @@ export class EddWorkbenchStack extends cdk.Stack {
       allowAllOutbound: true,
     });
     // Both need it: the api service for real search queries (search.ts),
-    // the worker for indexing writes (searchIndex.ts) and the reindex
-    // script's own bulk backfill.
+    // the worker for indexing writes (searchIndex.ts). The migrate task
+    // (reindexSearch.ts's own disaster-recovery path) gets its matching
+    // ingress rule down by migrateSecurityGroup's own declaration below —
+    // that security group doesn't exist yet at this point in the file.
     searchSecurityGroup.addIngressRule(
       apiService.service.connections.securityGroups[0],
       ec2.Port.tcp(9200),
@@ -1013,6 +1015,17 @@ export class EddWorkbenchStack extends cdk.Stack {
       allowAllOutbound: true,
     });
     database.connections.allowDefaultPortFrom(migrateSecurityGroup, "Migration task to RDS");
+    // Lets this same task definition also run reindexSearch.ts (via a
+    // command override at RunTask time) — the disaster-recovery path after
+    // a lost/never-created Elasticsearch index. It's the only task
+    // definition with DB *owner* credentials already securely wired
+    // (`secrets:` below, not a raw env override), which that script needs
+    // to read across every org bypassing RLS.
+    searchSecurityGroup.addIngressRule(
+      migrateSecurityGroup,
+      ec2.Port.tcp(9200),
+      "Migrate task (reindexSearch.ts) to search service (Elasticsearch)",
+    );
 
     const migrateTaskDefinition = new ecs.FargateTaskDefinition(this, "MigrateTaskDefinition", {
       cpu: 256,
@@ -1029,6 +1042,11 @@ export class EddWorkbenchStack extends cdk.Stack {
       environment: {
         DB_HOST: database.instanceEndpoint.hostname,
         DB_PORT: database.instanceEndpoint.port.toString(),
+        // Only reindexSearch.ts (run via a command override) reads this —
+        // migrate.ts/setAppPassword.ts's own default command never touches
+        // it — but it's simplest baked in here rather than requiring every
+        // RunTask override to also override environment.
+        ELASTICSEARCH_SERVICE_URL: ELASTICSEARCH_SERVICE_INTERNAL_URL,
       },
       secrets: {
         DB_USERNAME: ecs.Secret.fromSecretsManager(database.secret!, "username"),

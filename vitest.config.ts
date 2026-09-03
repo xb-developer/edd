@@ -21,6 +21,7 @@ export default defineConfig({
       S3_ENDPOINT: "http://localhost:9000",
       DOCUMENTS_BUCKET: "edd-workbench-documents-test",
       SQS_ENDPOINT: "http://localhost:9324",
+      ELASTICSEARCH_SERVICE_URL: "http://localhost:9200",
       EDD_WORKBENCH_INGEST_QUEUE_URL: "http://localhost:9324/queue/edd-workbench-ingest-test",
       EDD_WORKBENCH_EXPORT_QUEUE_URL: "http://localhost:9324/queue/edd-workbench-export-test",
       EDD_WORKBENCH_OCR_QUEUE_URL: "http://localhost:9324/queue/edd-workbench-ocr-test",

@@ -6,6 +6,7 @@ import { CreateBucketCommand, HeadBucketCommand } from "@aws-sdk/client-s3";
 import { CreateQueueCommand, PurgeQueueCommand } from "@aws-sdk/client-sqs";
 import { pool, withOrgSession, initMatterGuidCounter, s3Client, sqsClient, DOCUMENTS_BUCKET, consumeQueue } from "@xbundle/edd-workbench-core";
 import { handleIngestMessage } from "xbundle-edd-workbench-worker/src/handlers/ingest.js";
+import { handleSearchIndexMessage } from "xbundle-edd-workbench-worker/src/handlers/searchIndex.js";
 import { documentsRouter } from "./routes/documents.js";
 import type { EddRequestContext } from "./auth.js";
 
@@ -38,6 +39,8 @@ function buildTestApp(eddContext: EddRequestContext) {
 }
 
 const INGEST_QUEUE_URL = process.env.EDD_WORKBENCH_INGEST_QUEUE_URL!;
+const SEARCH_INDEX_QUEUE_URL = process.env.EDD_WORKBENCH_SEARCHINDEX_QUEUE_URL!;
+const ELASTICSEARCH_SERVICE_URL = process.env.ELASTICSEARCH_SERVICE_URL!;
 
 const FIXTURE_EML = Buffer.from(
   [
@@ -70,8 +73,18 @@ describe("full ingest pipeline (end-to-end)", () => {
     // handler, so this queue must exist too, not just the ingest one.
     await sqsClient.send(new CreateQueueCommand({ QueueName: "edd-workbench-embedding-test" }));
     // Same story for the search-index hand-off — unconditional for every
-    // non-container terminal state, not just 'ready'.
+    // non-container terminal state, not just 'ready'. Purged too, same
+    // reason as the ingest queue below: this test now actually drains it
+    // (real consumeQueue + handleSearchIndexMessage), and every OTHER test
+    // that drives real ingest through to 'ready' (ingest.test.ts,
+    // documents.test.ts's upload-complete) enqueues onto this same shared
+    // queue but never drains it — without purging first, this test can
+    // silently consume a stale message for some other, already-deleted
+    // test org instead of its own (found the hard way: handleSearchIndexMessage
+    // no-ops on a since-deleted document, so a stale message masks this
+    // test's real one with no error at all, just a wrong assertion later).
     await sqsClient.send(new CreateQueueCommand({ QueueName: "edd-workbench-search-index-test" }));
+    await sqsClient.send(new PurgeQueueCommand({ QueueUrl: SEARCH_INDEX_QUEUE_URL })).catch(() => {});
     await sqsClient.send(new PurgeQueueCommand({ QueueUrl: INGEST_QUEUE_URL })).catch(() => {});
 
     orgId = `org_test_${randomUUID()}`;
@@ -87,11 +100,19 @@ describe("full ingest pipeline (end-to-end)", () => {
     }));
   });
 
+  let indexedDocumentId: string | undefined;
+
   afterAll(async () => {
     await withOrgSession(orgId, async (client) => {
       await client.query("DELETE FROM audit_log WHERE org_id = $1", [orgId]);
       await client.query("DELETE FROM matters WHERE org_id = $1", [orgId]);
     });
+    // Best-effort — this is real Elasticsearch, not a per-test-isolated
+    // substitute, so leftover test docs shouldn't linger in a long-running
+    // local/dev instance across runs.
+    if (indexedDocumentId) {
+      await fetch(`${ELASTICSEARCH_SERVICE_URL}/edd-workbench-documents/_doc/${indexedDocumentId}`, { method: "DELETE" }).catch(() => {});
+    }
     await pool.end();
   });
 
@@ -135,5 +156,40 @@ describe("full ingest pipeline (end-to-end)", () => {
     expect(doc.title).toBe("Full pipeline test message");
     expect(doc.author).toContain("jane@example.com");
     expect(doc.metadata.bodyText.trim()).toBe("This message went through the real pipeline end to end.");
+
+    // 6. handleIngestMessage's own 'ready' branch enqueued a real
+    // search-index message (step 4 above) — drain it with the worker's
+    // real handleSearchIndexMessage, exactly like step 4 does for ingest.
+    // This is the piece "each seam has its own focused test" doesn't cover
+    // (searchIndex.test.ts mocks fetch entirely): that a document reaching
+    // 'ready' genuinely ends up populated in a REAL running Elasticsearch,
+    // not just that the handler *would* call fetch with plausible args.
+    indexedDocumentId = documentId;
+    const searchIndexController = new AbortController();
+    await consumeQueue(
+      SEARCH_INDEX_QUEUE_URL,
+      "search-index",
+      async (body) => {
+        await handleSearchIndexMessage(body);
+        searchIndexController.abort();
+      },
+      searchIndexController.signal,
+    );
+
+    // 7. Queried directly against the real Elasticsearch instance (GET by
+    // _id is realtime, unlike _search — no refresh-interval race to wait
+    // out) — proof this landed in the actual index, not just that some
+    // fetch call was made.
+    const esResponse = await fetch(`${ELASTICSEARCH_SERVICE_URL}/edd-workbench-documents/_doc/${documentId}`);
+    expect(esResponse.status).toBe(200);
+    const esDoc = (await esResponse.json()) as { _source: Record<string, unknown> };
+    expect(esDoc._source).toEqual({
+      org_id: orgId,
+      matter_id: matterId,
+      filename: "pipeline-test.eml",
+      extension: "eml",
+      guid: "000001",
+      body: "This message went through the real pipeline end to end.",
+    });
   });
 });

@@ -8,7 +8,8 @@
     "synth": "cdk synth",
     "diff": "cdk diff",
     "deploy": "cdk deploy",
-    "migrate": "node scripts/run-migrations.mjs"
+    "migrate": "node scripts/run-migrations.mjs",
+    "reindex": "node scripts/run-reindex.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-cloudformation": "^3.700.0",

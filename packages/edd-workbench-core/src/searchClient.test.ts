@@ -18,6 +18,10 @@ describe("searchClient", () => {
   });
 
   it("throws if ELASTICSEARCH_SERVICE_URL isn't set, without ever calling fetch", async () => {
+    // vitest.config.ts sets a real default for every other test in this
+    // suite (a genuine local Elasticsearch, not mocked) — unset it just for
+    // this one test, which is specifically about the missing-env-var case.
+    delete process.env.ELASTICSEARCH_SERVICE_URL;
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
     await expect(indexDocument(DOC)).rejects.toThrow("ELASTICSEARCH_SERVICE_URL");

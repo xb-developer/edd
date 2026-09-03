@@ -41,6 +41,22 @@ services:
     ports:
       - "9324:9324"
 
+  # Local substitute for the self-hosted search service (see
+  # infra/edd-workbench/lib/edd-workbench-stack.ts's SearchTaskDefinition) —
+  # same image/version and single-node/no-security config as production, so
+  # searchClient.ts's real HTTP calls run unmocked against a real
+  # Elasticsearch during tests, the same "real local substitutes, never
+  # mocks" precedent as postgres/minio/elasticmq above. Heap sized down for
+  # a local/test instance (production's own comment covers its own 4g).
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+
 volumes:
   edd-workbench-postgres-data:
   edd-workbench-minio-data:

@@ -11,11 +11,12 @@ new EddWorkbenchStack(app, "EddWorkbenchStaging", {
   environmentName: "staging",
   env: { region: "eu-west-2" },
   customDomain: {
-    domainName: "stage.xbundle.com",
+    domainName: "collate.xbundle.co.uk",
     // ACM certs for CloudFront must live in us-east-1 regardless of the
-    // stack's own region — already issued and validated (not this stack's
-    // to create; DNS validation needs control of xbundle.com's actual DNS,
-    // which isn't managed in this AWS account's Route53 at all).
-    certificateArn: "arn:aws:acm:us-east-1:901407941726:certificate/ee9da748-a427-414a-97f0-9cf54b9f74e8",
+    // stack's own region — imported (not ACM-issued) from a real cert
+    // (RapidSSL/DigiCert, valid through 2027-03-21) provided out of band,
+    // since this account doesn't manage xbundle.co.uk's actual DNS to do
+    // ACM's own DNS validation.
+    certificateArn: "arn:aws:acm:us-east-1:901407941726:certificate/4f0a2f4d-4760-44e1-a2f4-073acfa022af",
   },
 });

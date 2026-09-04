@@ -127,7 +127,11 @@ createRoot(document.getElementById("root")!).render(
       // heap) — accepted because a compromised page could already call
       // every authenticated API directly regardless of where the token
       // sits, so the actual exposure difference is small, and it's the
-      // only way to make the pop-out window work at all.
+      // only way to make the pop-out window work at all. Re-reviewed
+      // against COLLATE_SECURITY_FINDINGS.md Finding 3 (2026-09-04) and
+      // reaffirmed as-is for the same reason — the DPoP-advertisement half
+      // of that finding was a real bug (fixed in server/src/auth.ts) and
+      // is unrelated to this decision.
       cacheLocation="localstorage"
     >
       {viewerWindowParams ? (

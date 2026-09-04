@@ -946,6 +946,37 @@ describe("handleIngestMessage", () => {
     expect(doc.metadata).toBeNull();
   });
 
+  it("extracts a plain .txt upload's content into metadata.text — regression test for COLLATE_SECURITY_FINDINGS.md Finding 5 (.txt previously fell into the 'other' no-op above, ready but unsearchable)", async () => {
+    const { orgId, documentId } = await setupDocument({
+      filename: "notes.txt",
+      contentTypeDetected: "text",
+      body: Buffer.from("Plain text exhibit content."),
+    });
+    currentOrgId = orgId;
+    await handleIngestMessage(JSON.stringify({ documentId, orgId }));
+    const doc = await getDocument(orgId, documentId);
+
+    expect(doc.ingest_status).toBe("ready");
+    expect(doc.metadata.text).toBe("Plain text exhibit content.");
+  });
+
+  it("merges .txt extraction into pre-existing metadata rather than replacing it, so a zip/7z/mbox member's own {source, zipPath} provenance survives re-ingestion", async () => {
+    const { orgId, documentId } = await setupDocument({
+      filename: "exhibit-1.txt",
+      contentTypeDetected: "text",
+      body: Buffer.from("member content"),
+    });
+    currentOrgId = orgId;
+    await withOrgSession(orgId, (client) =>
+      client.query("UPDATE documents SET metadata = $1 WHERE id = $2", [JSON.stringify({ source: "zip", zipPath: "exhibit-1.txt" }), documentId]),
+    );
+
+    await handleIngestMessage(JSON.stringify({ documentId, orgId }));
+    const doc = await getDocument(orgId, documentId);
+
+    expect(doc.metadata).toEqual({ source: "zip", zipPath: "exhibit-1.txt", text: "member content" });
+  });
+
   it("extracts a pdf's real embedded text layer directly, with no OCR hand-off", async () => {
     const { orgId, documentId } = await setupDocument({
       filename: "bundle.pdf",

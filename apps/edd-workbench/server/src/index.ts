@@ -35,6 +35,9 @@ const PORT = process.env.EDD_WORKBENCH_SERVER_PORT ? Number(process.env.EDD_WORK
 const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS ?? "http://localhost:5283").split(",").map((o) => o.trim());
 
 export const app = express();
+// Framework fingerprinting is free reconnaissance for an attacker — no
+// functional cost to withholding it.
+app.disable("x-powered-by");
 app.use(cors({ origin: allowedOrigins }));
 app.use(express.json());
 

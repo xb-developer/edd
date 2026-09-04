@@ -267,10 +267,32 @@ export async function handleIngestMessage(body: string): Promise<void> {
           await client.query("UPDATE documents SET ingest_status = 'processing', ocr_status = 'processing' WHERE id = $1", [documentId]);
           reachedReady = false;
         }
+      } else if (contentType === "text") {
+        // Plain .txt — no container/markup to parse, just decode the bytes.
+        // UTF-8, with no charset sniffing/BOM handling: unlike the
+        // Windows-1252-heavy .msg HTML bodies (see msg.ts), a plain-text
+        // litigation export is UTF-8 or plain ASCII (a UTF-8 subset) in
+        // every real file this pipeline has seen. Previously this branch
+        // fell into the generic "other" no-op below, so .txt uploads
+        // completed as ingestStatus 'ready' with metadata null — invisible
+        // to search/`/ask` with nothing telling the reviewer why (see
+        // COLLATE_SECURITY_FINDINGS.md Finding 5).
+        //
+        // Merges into metadata (COALESCE + `||`) rather than replacing it —
+        // a .txt expanded out of a zip/7z/mbox already has metadata set at
+        // insert time (`{source, zipPath}`/`{source, mboxIndex}`, see
+        // containerExpansion.ts) and is re-ingested through this same
+        // handler; overwriting the column outright would silently erase
+        // that provenance.
+        const text = buffer.toString("utf-8").trim();
+        await client.query(
+          "UPDATE documents SET metadata = COALESCE(metadata, '{}'::jsonb) || $1::jsonb, ingest_status = 'ready' WHERE id = $2",
+          [JSON.stringify(text ? { text } : {}), documentId],
+        );
       } else {
-        // text/other: no extractor built for these yet. filename/ext/
-        // size/mtime were already captured at upload-init time, which is
-        // all these types get for now.
+        // "other": genuinely unrecognized extensions with no extractor
+        // built for them. filename/ext/size/mtime were already captured at
+        // upload-init time, which is all these get for now.
         await client.query("UPDATE documents SET ingest_status = 'ready' WHERE id = $1", [documentId]);
       }
 

@@ -9,10 +9,25 @@ if (!AUTH0_ISSUER_BASE_URL || !AUTH0_AUDIENCE) {
   throw new Error("AUTH0_ISSUER_BASE_URL and AUTH0_AUDIENCE environment variables are required");
 }
 
-/** Validates the JWT's signature/issuer/audience/expiry. Populates req.auth. */
+/**
+ * Validates the JWT's signature/issuer/audience/expiry. Populates req.auth.
+ *
+ * dpop.enabled is explicitly off: express-oauth2-jwt-bearer defaults it to
+ * true (opportunistic DPoP support) even though nothing here ever issues,
+ * accepts, or verifies a DPoP proof — the only visible effect of the
+ * default was every WWW-Authenticate header advertising
+ * `DPoP algs="RS256 ..."` on a missing/invalid token, which reads as "DPoP
+ * is required" when in fact plain Bearer tokens are accepted everywhere.
+ * That's misleading, not a real security posture (see
+ * COLLATE_SECURITY_FINDINGS.md Finding 3) — actually enforcing DPoP would
+ * mean every caller, including the pop-out document viewer window (a
+ * separate window.open() realm sharing auth state — see main.tsx),
+ * proof-of-possession-signing every request, which nothing here does today.
+ */
 export const requireValidToken = jwtAuth({
   issuerBaseURL: AUTH0_ISSUER_BASE_URL,
   audience: AUTH0_AUDIENCE,
+  dpop: { enabled: false },
 });
 
 export type Role = "admin" | "reviewer" | "litigation_support";

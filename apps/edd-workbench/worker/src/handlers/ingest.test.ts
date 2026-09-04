@@ -57,6 +57,18 @@ const FIXTURE_PROCESSING_CHECK_EML = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), "../../../../../test-data/eml/Processing check.eml"),
 );
 
+// A genuine, real-world Outlook message Nick supplied specifically to
+// reproduce a real body-extraction gap: this message has NO plain-text
+// body at all, only an HTML one (a signature block/footer with several
+// inline images) stored in a shape msgreader's own automatic decoding
+// doesn't populate `bodyHtml` from — see msg.ts's decodeRawBodyHtml and
+// msg.test.ts's own real-fixture test for the extractor-level fix this
+// exercises end-to-end at the ingest level. Lives in the repo-root
+// test-data/ directory per ONBOARDING.md's own convention.
+const FIXTURE_HTML_ONLY_MSG = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), "../../../../../test-data/msg/See attached and below.msg"),
+);
+
 async function buildFixtureDocx(): Promise<Buffer> {
   const zip = new JSZip();
   zip.file(
@@ -559,6 +571,32 @@ describe("handleIngestMessage", () => {
     expect(doc.ingest_status).toBe("ready");
     expect(doc.title).toBe("Sent time");
     expect(doc.author).toBe("xmailuser");
+  });
+
+  it("extracts an HTML-only .msg body (no plain-text body at all) via htmlToText, and excludes its inline signature images from real attachments", async () => {
+    const { orgId, documentId } = await setupDocument({
+      filename: "See attached and below.msg",
+      contentTypeDetected: "msg",
+      body: FIXTURE_HTML_ONLY_MSG,
+    });
+    currentOrgId = orgId;
+    await handleIngestMessage(JSON.stringify({ documentId, orgId }));
+    const doc = await getDocument(orgId, documentId);
+
+    expect(doc.ingest_status).toBe("ready");
+    expect(doc.metadata.bodyText.trim().startsWith("Text Text Text")).toBe(true);
+    expect(doc.metadata.bodyText).toContain("Mark Agombar");
+    expect(doc.metadata.bodyText).toContain("confidential to the intended recipient");
+
+    // The 4 inline signature images must never become their own child
+    // documents — only the genuinely attached nested .msg and PDF should.
+    const children = await withOrgSession(orgId, (client) =>
+      client.query("SELECT original_filename FROM documents WHERE parent_document_id = $1 ORDER BY guid_number", [documentId]),
+    );
+    expect(children.rows.map((r) => r.original_filename)).toEqual([
+      "Please see attached documents.msg",
+      "EDD Workbench — High-Speed Ingest Research & Plan.pdf",
+    ]);
   });
 
   it("expands a real .msg's attachments into their own child documents, each with a real GUID and a Family GUID link back to the parent, and each fully processed by re-entering the same handler", async () => {

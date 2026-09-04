@@ -1,5 +1,7 @@
 import * as MsgReaderModule from "@kenjiuno/msgreader";
-import type { FieldsData } from "@kenjiuno/msgreader";
+import type { FieldsData, RawProp } from "@kenjiuno/msgreader";
+import { htmlToText } from "html-to-text";
+import iconv from "iconv-lite";
 
 // @kenjiuno/msgreader is CJS with `exports.default = <ctor>`. Under
 // Vitest/esbuild's bundler-style interop, a default import unwraps that one
@@ -86,6 +88,42 @@ export function senderDisplay(name: string | undefined, email: string | undefine
   return realEmail ?? null;
 }
 
+// PidTagBodyHtml as a hex-encoded MAPI property tag: 1013 (the property)
+// + 0102 (PT_BINARY). msgreader's own automatic decoding only populates
+// `data.bodyHtml` for the PT_UNICODE/PT_STRING8 variants of this property —
+// confirmed against a real fixture (a message composed with an HTML
+// signature block and inline images) where PidTagBodyHtml is PT_BINARY and
+// `data.bodyHtml`/`data.compressedRtf` both come back undefined even though
+// the real HTML body is sitting right there in rawProps. Needs
+// `parserConfig.includeRawProps` set before `getFileData()` is called.
+const PIDTAG_BODY_HTML_BINARY = "10130102";
+
+/**
+ * Decodes a raw PidTagBodyHtml PT_BINARY property, honoring the HTML's own
+ * declared charset (its <meta charset=...> tag) rather than assuming UTF-8
+ * — Outlook commonly writes this as Windows-1252 (or another single-byte
+ * codepage), not UTF-8, and blindly UTF-8-decoding mangles any non-ASCII
+ * character in the body (confirmed on the real fixture above: an em-dash
+ * came back as U+FFFD). Reading the declared charset first via a 'latin1'
+ * pass (safe here — every byte maps 1:1 to a codepoint for the ASCII-range
+ * meta tag itself, regardless of the real encoding) and only reaching for
+ * iconv-lite when that charset isn't already UTF-8 keeps the common case
+ * cheap.
+ */
+function decodeRawBodyHtml(rawProps: RawProp[] | undefined): string | null {
+  const prop = (rawProps ?? []).find((p) => p.propertyTag === PIDTAG_BODY_HTML_BINARY);
+  if (!prop || !(prop.value instanceof Uint8Array)) return null;
+  const bytes = Buffer.from(prop.value);
+  const charset = bytes
+    .toString("latin1")
+    .match(/<meta[^>]+charset=["']?([\w-]+)/i)?.[1]
+    ?.toLowerCase();
+  if (charset && charset !== "utf-8" && charset !== "utf8" && iconv.encodingExists(charset)) {
+    return iconv.decode(bytes, charset);
+  }
+  return bytes.toString("utf-8");
+}
+
 function recipientsOfType(recipients: FieldsData[] | undefined, type: "to" | "cc"): string | null {
   const matches = (recipients ?? [])
     .filter((r) => r.recipType === type)
@@ -100,8 +138,13 @@ function recipientsOfType(recipients: FieldsData[] | undefined, type: "to" | "cc
  * throwing for anything that isn't a well-formed .msg — same graceful-
  * degradation contract as the eml/office extractors. Note: some older
  * Outlook messages store their body only as compressed RTF, which this
- * doesn't decode — those surface as bodyText: null (a known limitation,
- * not a bug — see the build plan's ingest pipeline notes).
+ * doesn't decode — those still surface as bodyText: null (a known
+ * limitation, not a bug — see the build plan's ingest pipeline notes).
+ * A message with NO plain-text body but a real HTML one (confirmed common:
+ * any message composed with formatting/a signature/inline images) falls
+ * back to htmlToText-stripping the HTML body instead of also giving up —
+ * see decodeRawBodyHtml's own comment for why that HTML often isn't even
+ * where msgreader's own automatic decoding looks for it.
  */
 export async function extractMsgMetadata(buffer: Buffer): Promise<MsgMetadata> {
   try {
@@ -111,6 +154,10 @@ export async function extractMsgMetadata(buffer: Buffer): Promise<MsgMetadata> {
     // constructor accepts ArrayBufferLike directly, and needs no byte copy.
     const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
     const reader = new MsgReaderCtor(view);
+    // Needed for decodeRawBodyHtml's own rawProps lookup below — set
+    // before getFileData() runs, since that's when parsing actually
+    // happens (parserConfig isn't consulted retroactively).
+    reader.parserConfig = { includeRawProps: true };
     const data = reader.getFileData();
     if (data.error) return NULL_METADATA;
 
@@ -144,13 +191,19 @@ export async function extractMsgMetadata(buffer: Buffer): Promise<MsgMetadata> {
       }
     }
 
+    let bodyText = data.body ?? null;
+    if (!bodyText) {
+      const html = data.bodyHtml ?? decodeRawBodyHtml(data.rawProps);
+      if (html) bodyText = htmlToText(html, { wordwrap: false }).trim() || null;
+    }
+
     return {
       from,
       to: recipientsOfType(data.recipients, "to"),
       cc: recipientsOfType(data.recipients, "cc"),
       subject: data.subject ?? null,
       date: dateSource ? new Date(dateSource) : null,
-      bodyText: data.body ?? null,
+      bodyText,
       attachmentFilenames: attachments.map((a) => a.filename),
       attachments,
     };

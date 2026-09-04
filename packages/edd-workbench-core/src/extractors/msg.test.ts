@@ -13,6 +13,20 @@ import { extractMsgMetadata, resolveAddress, senderDisplay } from "./msg.js";
 const FIXTURES_DIR = join(dirname(fileURLToPath(import.meta.url)), "__fixtures__");
 const load = (name: string) => readFileSync(join(FIXTURES_DIR, name));
 
+// A genuine, real-world Outlook message Nick supplied specifically to
+// reproduce a real body-extraction gap: this message has NO plain-text
+// body at all (PidTagBody absent) — only an HTML body with a signature
+// block/footer and several inline (cid:-referenced) images — and stores
+// that HTML as PT_BINARY, which msgreader's own automatic decoding doesn't
+// populate `data.bodyHtml` from at all. Before decodeRawBodyHtml's fix,
+// bodyText came back null for this message. Same test-data/ convention as
+// eml.test.ts's own REAL_FIXTURE_WITH_UNNAMED_FORWARD — real business
+// correspondence, deliberately kept out of permanent git history (see
+// ONBOARDING.md), not duplicated into this package's __fixtures__ dir.
+const REAL_FIXTURE_HTML_ONLY_BODY = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), "../../../../test-data/msg/See attached and below.msg"),
+);
+
 describe("extractMsgMetadata", () => {
   it("extracts sender, recipient, subject, body, and date from a real self-sent message", async () => {
     // sent.msg / sent.json (msgreader's own fixture): senderEmail
@@ -60,6 +74,34 @@ describe("extractMsgMetadata", () => {
       expect(attachment.content.byteLength).toBeGreaterThan(0);
       expect(attachment.content.subarray(0, 4)).toEqual(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
     }
+  });
+
+  it("falls back to the HTML body's plain text when there's no plain-text body at all, correctly decoding a non-UTF-8 charset and excluding inline signature images from real attachments", async () => {
+    const result = await extractMsgMetadata(REAL_FIXTURE_HTML_ONLY_BODY);
+
+    expect(result.bodyText).toBeTruthy();
+    // The message's own top line, before the signature/footer block below it.
+    expect(result.bodyText!.trim().startsWith("Text Text Text")).toBe(true);
+    // A load of real footer text: the signature block and the standard
+    // confidentiality disclaimer, both genuinely present further down.
+    expect(result.bodyText).toContain("Mark Agombar");
+    expect(result.bodyText).toContain("XBundle Ltd");
+    expect(result.bodyText).toContain("confidential to the intended recipient");
+    // Windows-1252 byte 0xA9 (©) — came back as U+FFFD before
+    // decodeRawBodyHtml's charset-aware decoding fix (blind UTF-8 mangles
+    // it); confirms the fix, not just that the loose body assertions above
+    // happen to still contain readable ASCII either way.
+    expect(result.bodyText).toContain("XBundle © Mark Agombar");
+    // htmlToText represents each inline <img> (several are inside an <a>
+    // linking out, one has real alt text) as a "[cid:...]" placeholder —
+    // confirming inline images are genuinely present in this fixture's
+    // body, not merely asserted by comment.
+    expect(result.bodyText).toMatch(/\[cid:[0-9a-f-]+\]/);
+
+    // The 4 inline signature images are all PidTagAttachmentHidden — must
+    // never show up as real attachments/child documents. Only the
+    // genuinely attached nested .msg and PDF should.
+    expect(result.attachmentFilenames).toEqual(["Please see attached documents.msg", "EDD Workbench — High-Speed Ingest Research & Plan.pdf"]);
   });
 
   it("prefers a real SMTP address over an Exchange X.500 directory name, verified against real test-data (a real .msg sent through Exchange)", () => {

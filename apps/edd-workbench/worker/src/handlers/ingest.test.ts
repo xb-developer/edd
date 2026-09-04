@@ -62,10 +62,11 @@ async function buildFixtureDocx(): Promise<Buffer> {
   zip.file(
     "docProps/core.xml",
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/">
+<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <dc:title>Witness Statement Draft</dc:title>
   <dc:subject>Draft for review</dc:subject>
   <dc:creator>Jane Reviewer</dc:creator>
+  <dcterms:modified xsi:type="dcterms:W3CDTF">2026-01-15T10:30:00Z</dcterms:modified>
 </cp:coreProperties>`,
   );
   zip.file("[Content_Types].xml", CONTENT_TYPES_XML);
@@ -127,7 +128,7 @@ function buildFixtureXlsx(): Buffer {
 function buildFixtureLegacyXls(): Buffer {
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([["Name", "Role"], ["Jane Reviewer", "Reviewer"]]), "Custodians");
-  workbook.Props = { Title: "Custodian Log", Author: "Jane Reviewer" };
+  workbook.Props = { Title: "Custodian Log", Author: "Jane Reviewer", ModifiedDate: new Date("2026-01-15T10:30:00Z") };
   return XLSX.write(workbook, { type: "buffer", bookType: "biff8" });
 }
 
@@ -392,7 +393,9 @@ describe("handleIngestMessage", () => {
 
     expect(doc.ingest_status).toBe("ready");
     expect(doc.title).toBe("Draft witness statement");
-    expect(doc.author).toContain("jane@example.com");
+    expect(doc.author).toBe("Jane Reviewer");
+    expect(doc.to_addresses).toContain("john@example.com");
+    expect(doc.cc_addresses).toBeNull();
     expect(doc.metadata.bodyText.trim()).toBe("Please review the attached draft.");
   });
 
@@ -410,6 +413,7 @@ describe("handleIngestMessage", () => {
     expect(doc.title).toBe("Witness Statement Draft");
     expect(doc.author).toBe("Jane Reviewer");
     expect(doc.subject).toBe("Draft for review");
+    expect(new Date(doc.content_modified_at).toISOString()).toBe(new Date("2026-01-15T10:30:00Z").toISOString());
     expect(doc.metadata.html).toContain("Please review the attached draft.");
   });
 
@@ -448,6 +452,7 @@ describe("handleIngestMessage", () => {
     expect(doc.ingest_status).toBe("ready");
     expect(doc.title).toBe("Custodian Log");
     expect(doc.author).toBe("Jane Reviewer");
+    expect(new Date(doc.content_modified_at).toISOString()).toBe(new Date("2026-01-15T10:30:00Z").toISOString());
     expect(doc.metadata.sheets[0].rows).toEqual([
       ["Name", "Role"],
       ["Jane Reviewer", "Reviewer"],
@@ -553,7 +558,7 @@ describe("handleIngestMessage", () => {
 
     expect(doc.ingest_status).toBe("ready");
     expect(doc.title).toBe("Sent time");
-    expect(doc.author).toContain("xmailuser@xmailserver.test");
+    expect(doc.author).toBe("xmailuser");
   });
 
   it("expands a real .msg's attachments into their own child documents, each with a real GUID and a Family GUID link back to the parent, and each fully processed by re-entering the same handler", async () => {

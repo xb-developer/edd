@@ -10,9 +10,11 @@ export interface XlsxContent {
   title: string | null;
   author: string | null;
   subject: string | null;
+  /** The workbook's own last-modified property (SheetJS's Props.ModifiedDate), NOT the uploaded file's browser-reported mtime. */
+  modified: Date | null;
 }
 
-const NULL_CONTENT: XlsxContent = { sheets: [], title: null, author: null, subject: null };
+const NULL_CONTENT: XlsxContent = { sheets: [], title: null, author: null, subject: null, modified: null };
 
 /**
  * Extracts every sheet's rows, plus title/author/subject, from a .xlsx/.xls
@@ -46,6 +48,7 @@ export async function extractXlsxContent(buffer: Buffer): Promise<XlsxContent> {
       title: workbook.Props?.Title ?? null,
       author: workbook.Props?.Author ?? null,
       subject: workbook.Props?.Subject ?? null,
+      modified: workbook.Props?.ModifiedDate ?? null,
     };
   } catch {
     return NULL_CONTENT;

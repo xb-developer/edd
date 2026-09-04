@@ -6,6 +6,7 @@ export interface EmlAttachment {
 }
 
 export interface EmlMetadata {
+  /** The sender's display name, or their address if no name was given (see senderDisplay) — used directly as the document's `author`. */
   from: string | null;
   to: string | null;
   cc: string | null;
@@ -21,6 +22,25 @@ export interface EmlMetadata {
 function addressText(value: { text: string } | { text: string }[] | undefined): string | null {
   if (!value) return null;
   return Array.isArray(value) ? value.map((v) => v.text).join(", ") : value.text;
+}
+
+/**
+ * The sender's display name, or their address if no name was given — NOT
+ * the combined "Name <address>" form `addressText` produces (used for
+ * `author`, where a reviewer wants "Jane Reviewer", not "Jane Reviewer
+ * <jane@example.com>"). mailparser's `AddressObject.value` array carries
+ * name/address as separate fields per parsed address, unlike `.text`
+ * (which is already the pre-rendered combined string) — this reads the
+ * first address's own fields directly instead.
+ */
+function senderDisplay(
+  value: { value: { name?: string; address?: string }[] } | { value: { name?: string; address?: string }[] }[] | undefined,
+): string | null {
+  if (!value) return null;
+  const addressObject = Array.isArray(value) ? value[0] : value;
+  const first = addressObject?.value?.[0];
+  if (!first) return null;
+  return first.name || first.address || null;
 }
 
 /**
@@ -59,7 +79,7 @@ export async function extractEmlMetadata(buffer: Buffer): Promise<EmlMetadata> {
   const realAttachments = parsed.attachments.filter((a) => !a.related);
 
   return {
-    from: addressText(parsed.from),
+    from: senderDisplay(parsed.from),
     to: addressText(parsed.to),
     cc: addressText(parsed.cc),
     subject: parsed.subject ?? null,

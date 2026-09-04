@@ -62,6 +62,9 @@ interface DocumentRow {
   author: string | null;
   subject: string | null;
   doc_date: string | null;
+  content_modified_at: string | null;
+  to_addresses: string | null;
+  cc_addresses: string | null;
   metadata: unknown;
   created_at: string;
 }
@@ -112,6 +115,9 @@ function toDocumentDTO(row: DocumentRow) {
     author: row.author,
     subject: row.subject,
     docDate: row.doc_date,
+    contentModifiedAt: row.content_modified_at,
+    toAddresses: row.to_addresses,
+    ccAddresses: row.cc_addresses,
     metadata: row.metadata,
     createdAt: row.created_at,
   };

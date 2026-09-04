@@ -138,13 +138,15 @@ export async function handleIngestMessage(body: string): Promise<void> {
         const eml = await extractEmlMetadata(buffer);
         await client.query(
           `UPDATE documents
-           SET title = $1, author = $2, subject = $3, doc_date = $4, metadata = $5, ingest_status = 'ready'
-           WHERE id = $6`,
+           SET title = $1, author = $2, subject = $3, doc_date = $4, to_addresses = $5, cc_addresses = $6, metadata = $7, ingest_status = 'ready'
+           WHERE id = $8`,
           [
             eml.subject,
             eml.from,
             eml.subject,
             eml.date,
+            eml.to,
+            eml.cc,
             JSON.stringify({
               to: eml.to,
               cc: eml.cc,
@@ -161,9 +163,9 @@ export async function handleIngestMessage(body: string): Promise<void> {
         const docx = await extractDocxContent(buffer);
         await client.query(
           `UPDATE documents
-           SET title = $1, author = $2, subject = $3, metadata = $4, ingest_status = 'ready'
-           WHERE id = $5`,
-          [office.title, office.author, office.subject, JSON.stringify({ html: docx.html }), documentId],
+           SET title = $1, author = $2, subject = $3, content_modified_at = $4, metadata = $5, ingest_status = 'ready'
+           WHERE id = $6`,
+          [office.title, office.author, office.subject, office.modified, JSON.stringify({ html: docx.html }), documentId],
         );
       } else if (contentType === "xlsx" || contentType === "csv") {
         // Covers .xlsx/.xls/.xla/.xlsm/.xltx (folded into "xlsx" by
@@ -178,9 +180,9 @@ export async function handleIngestMessage(body: string): Promise<void> {
         const xlsx = await extractXlsxContent(buffer);
         await client.query(
           `UPDATE documents
-           SET title = $1, author = $2, subject = $3, metadata = $4, ingest_status = 'ready'
-           WHERE id = $5`,
-          [xlsx.title, xlsx.author, xlsx.subject, JSON.stringify({ sheets: xlsx.sheets }), documentId],
+           SET title = $1, author = $2, subject = $3, content_modified_at = $4, metadata = $5, ingest_status = 'ready'
+           WHERE id = $6`,
+          [xlsx.title, xlsx.author, xlsx.subject, xlsx.modified, JSON.stringify({ sheets: xlsx.sheets }), documentId],
         );
       } else if (contentType === "doc") {
         // The upload-time ".doc" extension is only a guess — real
@@ -208,9 +210,9 @@ export async function handleIngestMessage(body: string): Promise<void> {
         const office = await extractOfficeText(buffer, contentType as OfficeTextFileType);
         await client.query(
           `UPDATE documents
-           SET title = $1, author = $2, subject = $3, metadata = $4, ingest_status = 'ready'
-           WHERE id = $5`,
-          [office.title, office.author, office.subject, office.text ? JSON.stringify({ text: office.text }) : null, documentId],
+           SET title = $1, author = $2, subject = $3, content_modified_at = $4, metadata = $5, ingest_status = 'ready'
+           WHERE id = $6`,
+          [office.title, office.author, office.subject, office.modified, office.text ? JSON.stringify({ text: office.text }) : null, documentId],
         );
       } else if (contentType === "pptx") {
         // pptx content isn't extracted here — @aiden0z/pptx-renderer (the
@@ -218,23 +220,23 @@ export async function handleIngestMessage(body: string): Promise<void> {
         // fetches the raw file via a view-url and renders it directly
         // instead of reading pre-extracted content from metadata.
         const office = await extractOfficeMetadata(buffer);
-        await client.query("UPDATE documents SET title = $1, author = $2, subject = $3, ingest_status = 'ready' WHERE id = $4", [
-          office.title,
-          office.author,
-          office.subject,
-          documentId,
-        ]);
+        await client.query(
+          "UPDATE documents SET title = $1, author = $2, subject = $3, content_modified_at = $4, ingest_status = 'ready' WHERE id = $5",
+          [office.title, office.author, office.subject, office.modified, documentId],
+        );
       } else if (contentType === "msg") {
         const msg = await extractMsgMetadata(buffer);
         await client.query(
           `UPDATE documents
-           SET title = $1, author = $2, subject = $3, doc_date = $4, metadata = $5, ingest_status = 'ready'
-           WHERE id = $6`,
+           SET title = $1, author = $2, subject = $3, doc_date = $4, to_addresses = $5, cc_addresses = $6, metadata = $7, ingest_status = 'ready'
+           WHERE id = $8`,
           [
             msg.subject,
             msg.from,
             msg.subject,
             msg.date,
+            msg.to,
+            msg.cc,
             JSON.stringify({ to: msg.to, cc: msg.cc, bodyText: msg.bodyText, attachmentFilenames: msg.attachmentFilenames }),
             documentId,
           ],

@@ -24,6 +24,7 @@ export interface MsgAttachment {
 }
 
 export interface MsgMetadata {
+  /** The sender's display name, or their address if no name was given (see senderDisplay) — used directly as the document's `author`. */
   from: string | null;
   to: string | null;
   cc: string | null;
@@ -70,6 +71,21 @@ export function resolveAddress(name: string | undefined, email: string | undefin
   return null;
 }
 
+/**
+ * The sender's display name, or their address if no name was given — NOT
+ * the combined "name <address>" form `resolveAddress` produces (used for
+ * `to`/`cc`, where that combined form is the conventional email-client
+ * display). Used for `author`, where a reviewer wants "Jane Reviewer", not
+ * "Jane Reviewer <jane@example.com>". Same real-address preference as
+ * `resolveAddress` (smtpAddress, then a real-looking `email`), just
+ * returning name-or-address instead of combining them.
+ */
+export function senderDisplay(name: string | undefined, email: string | undefined, smtpAddress: string | undefined): string | null {
+  if (name) return name;
+  const realEmail = smtpAddress || (email && email.includes("@") ? email : undefined);
+  return realEmail ?? null;
+}
+
 function recipientsOfType(recipients: FieldsData[] | undefined, type: "to" | "cc"): string | null {
   const matches = (recipients ?? [])
     .filter((r) => r.recipType === type)
@@ -98,7 +114,7 @@ export async function extractMsgMetadata(buffer: Buffer): Promise<MsgMetadata> {
     const data = reader.getFileData();
     if (data.error) return NULL_METADATA;
 
-    const from = resolveAddress(data.senderName, data.senderEmail, data.senderSmtpAddress);
+    const from = senderDisplay(data.senderName, data.senderEmail, data.senderSmtpAddress);
 
     const dateSource = data.messageDeliveryTime ?? data.clientSubmitTime ?? data.creationTime ?? null;
 

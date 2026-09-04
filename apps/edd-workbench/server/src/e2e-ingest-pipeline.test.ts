@@ -154,7 +154,7 @@ describe("full ingest pipeline (end-to-end)", () => {
     const doc = row.rows[0];
     expect(doc.ingest_status).toBe("ready");
     expect(doc.title).toBe("Full pipeline test message");
-    expect(doc.author).toContain("jane@example.com");
+    expect(doc.author).toBe("Jane Reviewer");
     expect(doc.metadata.bodyText.trim()).toBe("This message went through the real pipeline end to end.");
 
     // 6. handleIngestMessage's own 'ready' branch enqueued a real

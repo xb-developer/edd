@@ -135,7 +135,10 @@ describe("extractEmlMetadata", () => {
   it("extracts headers, both body variants, and attachment filenames from a real MIME message", async () => {
     const result = await extractEmlMetadata(FIXTURE_EML);
 
-    expect(result.from).toContain("jane@example.com");
+    // "Jane Reviewer" <jane@example.com> — a display name is present, so
+    // `from` (used directly as the document's author) is the name alone,
+    // not the combined "Name <address>" form addressText would give.
+    expect(result.from).toBe("Jane Reviewer");
     expect(result.to).toContain("john@example.com");
     expect(result.cc).toContain("case-team@example.com");
     expect(result.subject).toBe("Re: Draft disclosure list");
@@ -154,6 +157,16 @@ describe("extractEmlMetadata", () => {
     expect(result.attachmentFilenames).toEqual(["draft-list.pdf"]);
     expect(result.attachments).toHaveLength(1);
     expect(result.attachments[0].filename).toBe("draft-list.pdf");
+  });
+
+  it("falls back to the sender's bare address when the From header has no display name", async () => {
+    const noNameSender = Buffer.from(
+      ["From: jane@example.com", "Subject: No display name", "", "Just a body."].join("\r\n"),
+      "utf-8",
+    );
+    const result = await extractEmlMetadata(noNameSender);
+
+    expect(result.from).toBe("jane@example.com");
   });
 
   it("returns nulls/empties for missing optional fields rather than throwing", async () => {

@@ -56,6 +56,6 @@ describe("extractOfficeText", () => {
 
   it("returns nulls rather than throwing for bytes that don't match the declared fileType", async () => {
     const result = await extractOfficeText(Buffer.from("not a real odt file"), "odt");
-    expect(result).toEqual({ title: null, author: null, subject: null, text: null });
+    expect(result).toEqual({ title: null, author: null, subject: null, modified: null, text: null });
   });
 });

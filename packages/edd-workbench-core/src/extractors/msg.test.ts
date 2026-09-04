@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { extractMsgMetadata, resolveAddress } from "./msg.js";
+import { extractMsgMetadata, resolveAddress, senderDisplay } from "./msg.js";
 
 // Real Outlook .msg files, not synthetic — hand-building a byte-accurate
 // OLE/CFB fixture risks producing a fixture that's simply wrong, which
@@ -21,7 +21,11 @@ describe("extractMsgMetadata", () => {
     // messageDeliveryTime "Mon, 15 Feb 2021 08:19:00 GMT".
     const result = await extractMsgMetadata(load("sent.msg"));
 
-    expect(result.from).toContain("xmailuser@xmailserver.test");
+    // This fixture's own senderName is "xmailuser" — with a display name
+    // present, `from` (used directly as the document's author) is the name
+    // alone, not the combined "name <address>" form resolveAddress gives
+    // (still used for to/cc, asserted below).
+    expect(result.from).toBe("xmailuser");
     expect(result.to).toContain("xmailuser@xmailserver.test");
     expect(result.cc).toBeNull();
     expect(result.subject).toBe("Sent time");
@@ -79,6 +83,16 @@ describe("extractMsgMetadata", () => {
       "Smith, John (IT)",
     );
     expect(resolveAddress(undefined, undefined, undefined)).toBeNull();
+  });
+
+  it("senderDisplay prefers the display name alone over the combined 'name <address>' form resolveAddress gives, falling back to the address only when no name is present", () => {
+    // Used for `author` (a reviewer wants "Jane Reviewer", not "Jane
+    // Reviewer <jane@example.com>") — resolveAddress itself is unchanged
+    // and still used for to/cc, where the combined form is conventional.
+    expect(senderDisplay("Jane Reviewer", "jane@example.com", undefined)).toBe("Jane Reviewer");
+    expect(senderDisplay(undefined, "jane@example.com", undefined)).toBe("jane@example.com");
+    expect(senderDisplay(undefined, undefined, "jane@example.com")).toBe("jane@example.com");
+    expect(senderDisplay(undefined, undefined, undefined)).toBeNull();
   });
 
   it("returns nulls/empties rather than throwing for bytes that aren't a valid OLE file", async () => {

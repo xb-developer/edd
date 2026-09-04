@@ -3,19 +3,34 @@ import type { DocumentDTO } from "./types";
 export type SortDirection = "asc" | "desc";
 
 // Every column actually rendered as a plain, single-valued cell in
-// MatterDetail.tsx's table — "Tags" (a chip list) and "To"/"Cc" (nested
-// inside `metadata`, not a top-level DocumentDTO field) are deliberately
-// not included here, not an oversight.
-export type SortableColumn = "guid" | "familyGuid" | "originalFilename" | "extension" | "sizeBytes" | "docDate" | "fileModifiedAt" | "author";
+// MatterDetail.tsx's table — "Tags" (a chip list) is deliberately not
+// included here, not an oversight. toAddresses/ccAddresses are real
+// top-level DocumentDTO fields (promoted out of `metadata` — see migration
+// 031), same as author, so they sort the same simple string-comparison
+// way; they can hold multiple comma-joined addresses, so this is a
+// convenience ordering, not a meaningful "alphabetical by recipient" sort.
+export type SortableColumn =
+  | "guid"
+  | "familyGuid"
+  | "originalFilename"
+  | "extension"
+  | "sizeBytes"
+  | "docDate"
+  | "fileModifiedAt"
+  | "contentModifiedAt"
+  | "author"
+  | "toAddresses"
+  | "ccAddresses";
 
 /**
  * Sorts a real, unpadded copy of `docs` by one column, ascending or
  * descending. Handles every value shape the sortable columns actually
  * have: `guid`/`familyGuid` are zero-padded fixed-width numeric strings
  * (formatGuid), so a plain string comparison already sorts them
- * numerically; `sizeBytes` is a real number; `docDate`/`fileModifiedAt`
- * are ISO 8601 strings, whose lexical order already matches chronological
- * order for same-format timestamps, so no Date parsing is needed either.
+ * numerically; `sizeBytes` is a real number; `docDate`/`fileModifiedAt`/
+ * `contentModifiedAt` are ISO 8601 strings, whose lexical order already
+ * matches chronological order for same-format timestamps, so no Date
+ * parsing is needed either.
  *
  * A null value (author/docDate/fileModifiedAt can all be null) always
  * sorts to the END, in BOTH directions — not merely "smallest ascending,

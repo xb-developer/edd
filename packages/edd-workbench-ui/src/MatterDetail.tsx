@@ -63,7 +63,18 @@ function useDragResize(initial: number, min: number, max: number, axis: "x" | "y
   return { size, dragging, onPointerDown, onPointerMove, onPointerUp: endDrag, onPointerCancel: endDrag };
 }
 
-type DocumentColumnKey = "guid" | "familyGuid" | "originalFilename" | "extension" | "sizeBytes" | "docDate" | "tags";
+type DocumentColumnKey =
+  | "guid"
+  | "familyGuid"
+  | "originalFilename"
+  | "extension"
+  | "sizeBytes"
+  | "docDate"
+  | "author"
+  | "contentModifiedAt"
+  | "toAddresses"
+  | "ccAddresses"
+  | "tags";
 
 // Preferred widths for every resizable column EXCEPT filename — filename is
 // the one column that absorbs whatever space is actually available (see
@@ -74,6 +85,10 @@ const PREFERRED_COLUMN_WIDTHS: Omit<Record<DocumentColumnKey, number>, "original
   extension: 55,
   sizeBytes: 70,
   docDate: 90,
+  author: 130,
+  contentModifiedAt: 90,
+  toAddresses: 150,
+  ccAddresses: 150,
   tags: 150,
 };
 
@@ -650,6 +665,10 @@ export function MatterDetail({ api, matterId, canManageAccess }: MatterDetailPro
                     <col style={{ width: columnWidths.widths.extension }} />
                     <col style={{ width: columnWidths.widths.sizeBytes }} />
                     <col style={{ width: columnWidths.widths.docDate }} />
+                    <col style={{ width: columnWidths.widths.author }} />
+                    <col style={{ width: columnWidths.widths.contentModifiedAt }} />
+                    <col style={{ width: columnWidths.widths.toAddresses }} />
+                    <col style={{ width: columnWidths.widths.ccAddresses }} />
                     <col style={{ width: columnWidths.widths.tags }} />
                     <col style={{ width: CHECK_CELL_WIDTH }} />
                   </colgroup>
@@ -724,6 +743,42 @@ export function MatterDetail({ api, matterId, canManageAccess }: MatterDetailPro
                       >
                         Date
                       </SortableTh>
+                      <SortableTh
+                        column="author"
+                        sortColumn={sortColumn}
+                        sortDirection={sortDirection}
+                        onSort={toggleSort}
+                        resizeHandle={<ColumnResizeHandle column="author" columnWidths={columnWidths} />}
+                      >
+                        Author
+                      </SortableTh>
+                      <SortableTh
+                        column="contentModifiedAt"
+                        sortColumn={sortColumn}
+                        sortDirection={sortDirection}
+                        onSort={toggleSort}
+                        resizeHandle={<ColumnResizeHandle column="contentModifiedAt" columnWidths={columnWidths} />}
+                      >
+                        Date Modified
+                      </SortableTh>
+                      <SortableTh
+                        column="toAddresses"
+                        sortColumn={sortColumn}
+                        sortDirection={sortDirection}
+                        onSort={toggleSort}
+                        resizeHandle={<ColumnResizeHandle column="toAddresses" columnWidths={columnWidths} />}
+                      >
+                        To
+                      </SortableTh>
+                      <SortableTh
+                        column="ccAddresses"
+                        sortColumn={sortColumn}
+                        sortDirection={sortDirection}
+                        onSort={toggleSort}
+                        resizeHandle={<ColumnResizeHandle column="ccAddresses" columnWidths={columnWidths} />}
+                      >
+                        Cc
+                      </SortableTh>
                       {/* No inline position here — table.reg thead th already sets
                           position:sticky, which (like any non-static position)
                           already establishes the containing block the resize
@@ -776,6 +831,10 @@ export function MatterDetail({ api, matterId, canManageAccess }: MatterDetailPro
                           <td className="muted">{doc.extension}</td>
                           <td className="muted">{formatSize(doc.sizeBytes)}</td>
                           <td className="muted">{formatDate(doc.docDate)}</td>
+                          <td className="muted">{doc.author}</td>
+                          <td className="muted">{formatDate(doc.contentModifiedAt)}</td>
+                          <td className="muted">{doc.toAddresses}</td>
+                          <td className="muted">{doc.ccAddresses}</td>
                           <td>
                             <div className="tagchips">
                               <span

@@ -1,4 +1,4 @@
-import { withOrgSession, resolveEmbeddableText, chunkText, embedTexts, replaceDocumentChunks, recordAiUsage } from "@xbundle/edd-workbench-core";
+import { withOrgSession, resolveEmbeddableText, chunkText, embedTexts, replaceDocumentChunks, recordAiUsage, detectInjectionPatterns } from "@xbundle/edd-workbench-core";
 
 interface EmbeddingMessage {
   documentId: string;
@@ -53,8 +53,18 @@ export async function handleEmbeddingMessage(body: string): Promise<void> {
     return;
   }
 
+  // Run right here, on the exact text that's about to be chunked and made
+  // retrievable — this is the same string resolveEmbeddableText hands to
+  // ask.ts's retrieval later, i.e. the actual attack surface (see
+  // COLLATE_SECURITY_FINDINGS.md Finding 1 and injectionDetection.ts's own
+  // top-of-file comment for why prompt-level defenses alone weren't
+  // enough). Set alongside embedding_status rather than a separate query —
+  // this document is embedded either way (see that module's own comment on
+  // why silent exclusion, not blocking, is the right response), just with
+  // a warning a reviewer can see.
+  const { warning: contentWarning } = detectInjectionPatterns(text);
   await withOrgSession(orgId, (client) =>
-    client.query("UPDATE documents SET embedding_status = 'processing' WHERE id = $1", [documentId]),
+    client.query("UPDATE documents SET embedding_status = 'processing', content_warning = $1 WHERE id = $2", [contentWarning, documentId]),
   );
 
   try {

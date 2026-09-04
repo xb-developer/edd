@@ -843,6 +843,11 @@ export function MatterDetail({ api, matterId, canManageAccess }: MatterDetailPro
                               >
                                 {doc.ingestStatus}
                               </span>
+                              {doc.contentWarning && (
+                                <span className="chip" style={{ background: "#A6362C22", color: "#A6362C" }} title={doc.contentWarning}>
+                                  ⚠ possible injection
+                                </span>
+                              )}
                               {appliedTagIds.map((tagId) => {
                                 const tag = tagsById.get(tagId);
                                 if (!tag) return null;

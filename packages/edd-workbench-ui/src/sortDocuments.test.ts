@@ -25,6 +25,7 @@ function doc(overrides: Partial<DocumentDTO>): DocumentDTO {
     toAddresses: null,
     ccAddresses: null,
     metadata: null,
+    contentWarning: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     ...overrides,
   };

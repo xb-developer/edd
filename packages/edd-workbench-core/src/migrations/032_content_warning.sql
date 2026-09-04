@@ -1,0 +1,11 @@
+-- Reviewer-facing warning surfaced on documents whose extracted text
+-- resembles an AI prompt-injection attempt (see
+-- COLLATE_SECURITY_FINDINGS.md Finding 1) — set by embedding.ts's own
+-- detection pass, at exactly the point that text is about to become
+-- RAG-retrievable context. Nullable text, not a boolean: the actual
+-- matched-pattern description is what makes the warning useful to a
+-- reviewer deciding how much to trust an AI answer that cites this
+-- document, not just a yes/no flag. Re-set (including cleared back to
+-- null) on every embedding run, same "recomputed fresh, not append-only"
+-- convention ingest_error/embedding_error already follow.
+ALTER TABLE documents ADD COLUMN content_warning text;

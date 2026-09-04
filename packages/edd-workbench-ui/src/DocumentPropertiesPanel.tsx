@@ -73,6 +73,12 @@ export function DocumentPropertiesPanel({ document }: DocumentPropertiesPanelPro
             <dd>{document.ingestError}</dd>
           </>
         )}
+        {document.contentWarning && (
+          <>
+            <dt style={{ color: "#A6362C" }}>⚠ Warning</dt>
+            <dd style={{ color: "#A6362C" }}>{document.contentWarning}</dd>
+          </>
+        )}
       </dl>
     </div>
   );

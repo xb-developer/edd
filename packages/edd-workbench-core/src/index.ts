@@ -16,6 +16,7 @@ export { extractDocContent, type DocExtractionResult, type DetectedDocFormat } f
 export { extractOfficeText, type OfficeTextContent, type OfficeTextFileType } from "./extractors/officeText.js";
 export { extractPdfTextLayer } from "./extractors/pdfText.js";
 export { resolveEmbeddableText } from "./embeddableText.js";
+export { detectInjectionPatterns, type InjectionCheckResult } from "./injectionDetection.js";
 export { chunkText } from "./chunking.js";
 export { embedTexts, type EmbedTextsResult } from "./embeddingClient.js";
 export { generateAnswer, type ChatMessage, type GenerateAnswerResult } from "./generationClient.js";

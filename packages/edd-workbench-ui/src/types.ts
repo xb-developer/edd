@@ -87,6 +87,8 @@ export interface DocumentDTO {
   // Type-specific extras (eml/msg's to/cc/bodyText/bodyHtml/attachmentFilenames)
   // — see build plan §2's "hybrid columns + jsonb" decision.
   metadata: Record<string, unknown> | null;
+  /** Set when this document's extracted text resembles an AI prompt-injection attempt (see COLLATE_SECURITY_FINDINGS.md Finding 1 and embedding.ts's own detection pass) — null for every ordinary document. A warning, not a block: the document is still fully searchable/AI-indexed, so a reviewer can judge an AI answer citing it accordingly. */
+  contentWarning: string | null;
   createdAt: string;
 }
 

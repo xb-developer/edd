@@ -66,6 +66,7 @@ interface DocumentRow {
   to_addresses: string | null;
   cc_addresses: string | null;
   metadata: unknown;
+  content_warning: string | null;
   created_at: string;
 }
 
@@ -119,6 +120,7 @@ function toDocumentDTO(row: DocumentRow) {
     toAddresses: row.to_addresses,
     ccAddresses: row.cc_addresses,
     metadata: row.metadata,
+    contentWarning: row.content_warning,
     createdAt: row.created_at,
   };
 }

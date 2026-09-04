@@ -13,7 +13,7 @@
     "@aws-sdk/s3-request-presigner": "^3.1104.0",
     "@xbundle/edd-workbench-core": "*",
     "cors": "^2.8.5",
-    "express": "^4.21.1",
+    "express": "^5.0.0",
     "express-oauth2-jwt-bearer": "^1.6.0"
   },
   "devDependencies": {

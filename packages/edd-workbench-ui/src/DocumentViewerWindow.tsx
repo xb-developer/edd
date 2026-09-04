@@ -57,7 +57,7 @@ export function DocumentViewerWindow({ apiBaseUrl = "http://localhost:4430/api",
       .getDocument(matterId, documentId)
       .then((doc) => {
         setDocument(doc);
-        window.document.title = `${doc.originalFilename} — EDD Workbench Viewer`;
+        window.document.title = `${doc.originalFilename} — Collate Viewer`;
       })
       .catch((err) => {
         // A 401 here (expired/cleared token) is the one case worth telling

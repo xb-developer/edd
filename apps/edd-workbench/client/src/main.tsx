@@ -43,9 +43,9 @@ function AppShell() {
         <div className="matter-card" style={{ textAlign: "center" }}>
           <div className="brand" style={{ justifyContent: "center", marginBottom: 18 }}>
             <span className="mark" style={{ borderColor: "var(--navy)", color: "var(--navy)" }}>
-              eD
+              Co
             </span>
-            <h1>EDD Workbench</h1>
+            <h1>Collate</h1>
           </div>
           <button type="button" onClick={() => loginWithRedirect()} style={{ width: "100%", padding: "9px 0" }}>
             Log in

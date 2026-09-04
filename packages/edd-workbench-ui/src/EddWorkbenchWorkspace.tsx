@@ -168,7 +168,7 @@ export function EddWorkbenchWorkspace({ apiBaseUrl = "http://localhost:4430/api"
       <div className="app">
         <header className="topbar">
           <div className="brand">
-            <span className="mark">eD</span>
+            <span className="mark">Co</span>
           </div>
           {onLogout && (
             <button type="button" className="topbar-btn" onClick={handleLogout}>
@@ -212,7 +212,7 @@ export function EddWorkbenchWorkspace({ apiBaseUrl = "http://localhost:4430/api"
           </button>
         )}
         <div className="brand">
-          <span className="mark">eD</span>
+          <span className="mark">Co</span>
           {editingName ? (
             <input
               className="matter-name-input"

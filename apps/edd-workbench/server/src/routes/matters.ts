@@ -98,14 +98,17 @@ mattersRouter.post("/", requireRole("admin", "litigation_support"), async (req, 
       // Seeds the same two built-in tag sets migration 013/014's own
       // backfill gave every pre-existing matter, kept in sync deliberately
       // (a test asserts they match) so a brand-new matter looks identical
-      // to one that existed before the coding backend shipped.
+      // to one that existed before the coding backend shipped. Names match
+      // migration 030's rename of those same existing tags — kept in sync
+      // deliberately so a brand-new matter's tags read the same as an
+      // older matter's already-renamed ones.
       const privilege = await client.query<{ id: string }>(
         "INSERT INTO tag_sets (org_id, matter_id, name, position) VALUES ($1, $2, 'Privilege', 0) RETURNING id",
         [orgId, row.id],
       );
       await client.query(
         `INSERT INTO tags (org_id, matter_id, tag_set_id, name, color, position) VALUES
-         ($1, $2, $3, 'Privileged', '#A6362C', 0), ($1, $2, $3, 'Work Product', '#B4551F', 1)`,
+         ($1, $2, $3, 'Priviledged', '#A6362C', 0), ($1, $2, $3, 'Not Priviledged', '#B4551F', 1)`,
         [orgId, row.id, privilege.rows[0].id],
       );
       const review = await client.query<{ id: string }>(
@@ -114,7 +117,7 @@ mattersRouter.post("/", requireRole("admin", "litigation_support"), async (req, 
       );
       await client.query(
         `INSERT INTO tags (org_id, matter_id, tag_set_id, name, color, position) VALUES
-         ($1, $2, $3, 'Responsive', '#3F7D2C', 0), ($1, $2, $3, 'Not Responsive', NULL, 1), ($1, $2, $3, 'Hot Doc', '#B03362', 2)`,
+         ($1, $2, $3, 'Relevant', '#3F7D2C', 0), ($1, $2, $3, 'Not Relevant', NULL, 1), ($1, $2, $3, 'Hot Doc', '#B03362', 2)`,
         [orgId, row.id, review.rows[0].id],
       );
 

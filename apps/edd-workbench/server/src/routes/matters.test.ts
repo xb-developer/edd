@@ -59,10 +59,10 @@ describe("matters router — POST /", () => {
       );
 
       expect(rows.rows.map((r) => `${r.set_name}:${r.tag_name}:${r.color ?? ""}`)).toEqual([
-        "Privilege:Privileged:#A6362C",
-        "Privilege:Work Product:#B4551F",
-        "Review:Responsive:#3F7D2C",
-        "Review:Not Responsive:",
+        "Privilege:Priviledged:#A6362C",
+        "Privilege:Not Priviledged:#B4551F",
+        "Review:Relevant:#3F7D2C",
+        "Review:Not Relevant:",
         "Review:Hot Doc:#B03362",
       ]);
     } finally {

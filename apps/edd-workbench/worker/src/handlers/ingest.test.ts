@@ -1061,6 +1061,37 @@ describe("handleIngestMessage", () => {
     expect(doc.ingest_error).toBeTruthy();
   });
 
+  it("still reaches a visible, retriable 'failed' state (with the real error recorded) when the extraction UPDATE itself fails server-side, instead of leaving the document silently stuck at 'pending' forever — regression test for the SAVEPOINT fix: withOrgSession's single transaction meant a failed query previously left the transaction unusable, so even the catch handler's own recovery UPDATE failed too (masking the real error). A NUL byte landing in an eml body (real Postgres jsonb rejects it outright) is the same class of DB-level failure that surfaced for real in a batch of mis-extension'd binary '.txt' files — this proves the recovery, independent of that specific fix", async () => {
+    const headerLines = [
+      'From: "Jane Reviewer" <jane@example.com>',
+      'To: "John Admin" <john@example.com>',
+      "Subject: Corrupted body",
+      "Date: Mon, 12 Jan 2026 09:30:00 +0000",
+      "MIME-Version: 1.0",
+      'Content-Type: text/plain; charset="utf-8"',
+      "",
+      "Body with a stray byte before this word: ",
+    ].join("\r\n");
+    // A single real control byte (0x00), built from an explicit numeric
+    // byte array rather than typed as an escape sequence in this source
+    // file — Postgres jsonb rejects this exact byte outright, which is
+    // the real repro this test needs.
+    const controlByte = Buffer.from([0]);
+    const fixtureWithControlByte = Buffer.concat([Buffer.from(headerLines, "utf-8"), controlByte, Buffer.from("end.\r\n", "utf-8")]);
+
+    const { orgId, documentId } = await setupDocument({ filename: "corrupt.eml", contentTypeDetected: "eml", body: fixtureWithControlByte });
+    currentOrgId = orgId;
+    await handleIngestMessage(JSON.stringify({ documentId, orgId }));
+    const doc = await getDocument(orgId, documentId);
+
+    expect(doc.ingest_status).toBe("failed");
+    // The REAL underlying error, not the masking "current transaction is
+    // aborted, commands ignored until end of transaction block" that
+    // reached the worker's own top-level log before this fix.
+    expect(doc.ingest_error).not.toContain("current transaction is aborted");
+    expect(doc.ingest_error).toBeTruthy();
+  });
+
   it("transparently expands a real multi-message .ost: the PST's own row/S3 object disappear, each message becomes its own independent family root", async () => {
     const { orgId, documentId } = await setupDocument({
       filename: "mtnman1965@outlook.com.ost",

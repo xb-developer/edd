@@ -57,7 +57,7 @@ async function createTestOrgAndMatter(namePrefix: string) {
     );
     await client.query(
       `INSERT INTO tags (org_id, matter_id, tag_set_id, name, color, position) VALUES
-       ($1, $2, $3, 'Priviledged', '#A6362C', 0), ($1, $2, $3, 'Not Priviledged', '#B4551F', 1)`,
+       ($1, $2, $3, 'Privileged', '#A6362C', 0), ($1, $2, $3, 'Not Privileged', '#B4551F', 1)`,
       [orgId, matterRow.rows[0].id, privilege.rows[0].id],
     );
     const review = await client.query<{ id: string }>(
@@ -88,7 +88,7 @@ describe("tags router", () => {
       expect(response.status).toBe(200);
       expect(response.body).toHaveLength(2);
       expect(response.body[0].name).toBe("Privilege");
-      expect(response.body[0].tags.map((t: { name: string }) => t.name)).toEqual(["Priviledged", "Not Priviledged"]);
+      expect(response.body[0].tags.map((t: { name: string }) => t.name)).toEqual(["Privileged", "Not Privileged"]);
       expect(response.body[0].tags[0].color).toBe("#A6362C");
       expect(response.body[1].name).toBe("Review");
       expect(response.body[1].tags.map((t: { name: string }) => t.name)).toEqual(["Relevant", "Not Relevant", "Hot Doc"]);

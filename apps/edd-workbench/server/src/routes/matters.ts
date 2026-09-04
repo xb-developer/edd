@@ -108,7 +108,7 @@ mattersRouter.post("/", requireRole("admin", "litigation_support"), async (req, 
       );
       await client.query(
         `INSERT INTO tags (org_id, matter_id, tag_set_id, name, color, position) VALUES
-         ($1, $2, $3, 'Priviledged', '#A6362C', 0), ($1, $2, $3, 'Not Priviledged', '#B4551F', 1)`,
+         ($1, $2, $3, 'Privileged', '#A6362C', 0), ($1, $2, $3, 'Not Privileged', '#B4551F', 1)`,
         [orgId, row.id, privilege.rows[0].id],
       );
       const review = await client.query<{ id: string }>(

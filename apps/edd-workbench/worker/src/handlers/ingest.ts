@@ -130,6 +130,28 @@ export async function handleIngestMessage(body: string): Promise<void> {
     // enqueues its own embedding check once OCR itself finishes).
     let reachedReady = true;
 
+    // Real bug this fixed: withOrgSession wraps this whole callback in ONE
+    // transaction (see session.ts) — a query failure anywhere in the try
+    // block below leaves that transaction aborted (Postgres error 25P02,
+    // "current transaction is aborted"), so the catch handler's OWN
+    // "mark ingest_status = 'failed'" UPDATE then failed too, propagating
+    // out of withOrgSession, rolling back the whole transaction (including
+    // the harmless docRow SELECT above), and leaving the document stuck at
+    // 'pending' forever with no ingest_error ever recorded — the real
+    // original error was silently lost, and the document was invisible to
+    // both the "failed" filter and RetryIngestButton (which only surfaces
+    // ingestStatus === 'failed'). Confirmed for real against a batch upload
+    // where several old, generic "mime001.txt"-named MIME parts turned out
+    // to be raw OLE2 binary (Compound File Binary magic bytes), not text —
+    // buffer.toString("utf-8") on binary content routinely produces NUL
+    // bytes, which jsonb (and Postgres text generally) rejects outright.
+    // ROLLBACK TO SAVEPOINT restores the transaction to a usable state
+    // before the catch handler tries to record the failure, so this
+    // degrades to a normal, visible, retriable 'failed' document instead
+    // of a silent black hole — for this cause and any other extraction
+    // failure, not just this one.
+    await client.query("SAVEPOINT extraction_attempt");
+
     try {
       const object = await s3Client.send(new GetObjectCommand({ Bucket: DOCUMENTS_BUCKET, Key: s3Key! }));
       const buffer = await streamToBuffer(object.Body as Readable);
@@ -284,7 +306,20 @@ export async function handleIngestMessage(body: string): Promise<void> {
         // containerExpansion.ts) and is re-ingested through this same
         // handler; overwriting the column outright would silently erase
         // that provenance.
-        const text = buffer.toString("utf-8").trim();
+        //
+        // Strips NUL bytes before storing — a real production repro: a
+        // batch of generically-named "mime001.txt" MIME parts turned out to
+        // be raw OLE2 binary (Compound File Binary magic bytes), not text
+        // at all. buffer.toString("utf-8") doesn't throw on arbitrary bytes
+        // (Node's UTF-8 decoding is lenient), but the NUL bytes ordinary
+        // binary data contains are perfectly valid JS string characters
+        // that Postgres text/jsonb flatly rejects — this crashed the
+        // extraction query outright for every one of these files. A
+        // mis-extension'd binary file becoming unsearchable garbage text
+        // instead of a crash is the acceptable degradation here, matching
+        // every other extractor's own "never throw on malformed input"
+        // contract.
+        const text = buffer.toString("utf-8").replace(new RegExp(String.fromCharCode(0), "g"), "").trim();
         await client.query(
           "UPDATE documents SET metadata = COALESCE(metadata, '{}'::jsonb) || $1::jsonb, ingest_status = 'ready' WHERE id = $2",
           [JSON.stringify(text ? { text } : {}), documentId],
@@ -308,6 +343,7 @@ export async function handleIngestMessage(body: string): Promise<void> {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      await client.query("ROLLBACK TO SAVEPOINT extraction_attempt");
       await client.query("UPDATE documents SET ingest_status = 'failed', ingest_error = $1 WHERE id = $2", [message, documentId]);
     }
     return null;

@@ -61,6 +61,16 @@ export class EddWorkbenchStack extends cdk.Stack {
         { name: "isolated", subnetType: ec2.SubnetType.PRIVATE_ISOLATED, cidrMask: 24 },
       ],
     });
+    // Free — a Gateway endpoint has no hourly/data charge of its own, unlike
+    // an Interface endpoint. Every document upload/download/OCR/export read
+    // or write to DocumentsBucket was previously routed out through the NAT
+    // Gateway and billed at $0.05/GB there; a real cost-audit (2026-09-04)
+    // found NAT data-processing charges far larger than the NAT Gateway's
+    // own flat hourly fee, with S3 traffic as the overwhelmingly likely
+    // cause given this app's I/O pattern. Route table entries for S3 are
+    // added automatically to every subnet in the VPC's private/isolated
+    // subnet groups.
+    vpc.addGatewayEndpoint("S3Endpoint", { service: ec2.GatewayVpcEndpointAwsService.S3 });
 
     // --- Encryption ----------------------------------------------------
     // One CMK per environment for MVP (build plan §1) — per-tenant CMKs are
@@ -573,6 +583,18 @@ export class EddWorkbenchStack extends cdk.Stack {
       instanceType: ec2.InstanceType.of(ec2.InstanceClass.G6, ec2.InstanceSize.XLARGE),
       machineImage: ecs.EcsOptimizedImage.amazonLinux2(ecs.AmiHardwareType.GPU),
       securityGroup: embeddingInstanceSecurityGroup,
+      // Spot, not on-demand — a real cost audit (2026-09-04) found g6.xlarge
+      // spot pricing in eu-west-2 running ~65% below on-demand. Safe here
+      // specifically because this instance already only ever runs on a
+      // schedule with minCapacity 0 (see embeddingAsg below) and every
+      // caller already has a graceful "AI service unavailable" fallback for
+      // exactly the case of this instance not being up (see ask.ts/
+      // embedding.ts's own GPU_UNAVAILABLE_MESSAGE handling for the
+      // outside-business-hours case) — a Spot interruption just hits that
+      // same existing path, not a new failure mode. No maxPrice set:
+      // defaults to the on-demand rate as a ceiling, so this can never cost
+      // MORE than what was already budgeted for, only less.
+      spotOptions: { requestType: ec2.SpotRequestType.ONE_TIME },
       // AsgCapacityProvider needs both of these to be explicit and
       // pre-attached — it can't inject an instance profile/role or amend
       // user data on an already-created launch template, unlike the legacy
@@ -721,10 +743,11 @@ export class EddWorkbenchStack extends cdk.Stack {
 
     // Business hours only, UK time — ScheduleExpressionTimezone handles
     // the BST/GMT clock change automatically, unlike a fixed UTC cron
-    // would. Narrow this window once real usage patterns are known (every
-    // hour trimmed is real, direct savings at this instance size).
+    // would. Narrowed from 7am-7pm to 9am-6pm (2026-09-04) once real usage
+    // data confirmed actual usage sits inside that window — every hour
+    // trimmed is real, direct savings at g6.xlarge's on-demand rate.
     new scheduler.CfnSchedule(this, "EmbeddingScheduleStart", {
-      scheduleExpression: "cron(0 7 ? * MON-FRI *)",
+      scheduleExpression: "cron(0 9 ? * MON-FRI *)",
       scheduleExpressionTimezone: "Europe/London",
       flexibleTimeWindow: { mode: "OFF" },
       target: {
@@ -734,7 +757,7 @@ export class EddWorkbenchStack extends cdk.Stack {
       },
     });
     new scheduler.CfnSchedule(this, "EmbeddingScheduleStop", {
-      scheduleExpression: "cron(0 19 ? * MON-FRI *)",
+      scheduleExpression: "cron(0 18 ? * MON-FRI *)",
       scheduleExpressionTimezone: "Europe/London",
       flexibleTimeWindow: { mode: "OFF" },
       target: {
@@ -769,6 +792,12 @@ export class EddWorkbenchStack extends cdk.Stack {
       role: generationInstanceRole,
       userData: ec2.UserData.forLinux(),
       blockDevices: [{ deviceName: "/dev/xvda", volume: autoscaling.BlockDeviceVolume.ebs(100) }],
+      // Spot, not on-demand — see embeddingLaunchTemplate's own comment for
+      // the full reasoning (schedule-gated, minCapacity 0, existing
+      // GPU_UNAVAILABLE_MESSAGE fallback already covers an interruption the
+      // same way it covers outside-business-hours). No maxPrice: defaults
+      // to the on-demand rate as a ceiling.
+      spotOptions: { requestType: ec2.SpotRequestType.ONE_TIME },
     });
     const generationAsg = new autoscaling.AutoScalingGroup(this, "GenerationAsg", {
       vpc,
@@ -837,7 +866,7 @@ export class EddWorkbenchStack extends cdk.Stack {
     );
 
     new scheduler.CfnSchedule(this, "GenerationScheduleStart", {
-      scheduleExpression: "cron(0 7 ? * MON-FRI *)",
+      scheduleExpression: "cron(0 9 ? * MON-FRI *)",
       scheduleExpressionTimezone: "Europe/London",
       flexibleTimeWindow: { mode: "OFF" },
       target: {
@@ -847,7 +876,7 @@ export class EddWorkbenchStack extends cdk.Stack {
       },
     });
     new scheduler.CfnSchedule(this, "GenerationScheduleStop", {
-      scheduleExpression: "cron(0 19 ? * MON-FRI *)",
+      scheduleExpression: "cron(0 18 ? * MON-FRI *)",
       scheduleExpressionTimezone: "Europe/London",
       flexibleTimeWindow: { mode: "OFF" },
       target: {

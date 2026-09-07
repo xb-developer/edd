@@ -4,7 +4,7 @@ This file exists to move active work on EDD Workbench to a new machine with full
 
 ## What this is
 
-**EDD Workbench**: a cloud-based, multi-tenant, multi-user eDiscovery SPA, inside the `xbundle-platform` monorepo. Built for Nick (nick@xbundle.co.uk). Staging deployment is at `https://stage.xbundle.com`, AWS region `eu-west-2`, single CDK stack `EddWorkbenchStaging` — no production stack exists yet.
+**EDD Workbench**: a cloud-based, multi-tenant, multi-user eDiscovery SPA, inside the `xbundle-platform` monorepo. Built for Nick (nick@xbundle.co.uk). Staging deployment is at `https://collate.xbundle.co.uk`, AWS region `eu-west-2`, single CDK stack `EddWorkbenchStaging` — no production stack exists yet.
 
 A separate **Electron desktop proof-of-concept** lives in this same repo at `proof-of-concept/` (`client`/`electron`/`server` workspaces — `cloud-backend`/`web` inside that folder are an unrelated, abandoned rebuild attempt; ignore those two). It's the design reference this whole rebuild has been matched against feature-by-feature — when in doubt about how something should look or behave, check the POC's real source before guessing.
 
@@ -69,8 +69,8 @@ npm run migrate -- EddWorkbenchStaging
 
 **Verify a deploy actually landed — don't trust a report that it ran.** Twice in this project's history, "I ran cdk deploy" didn't actually update the live site. The reliable, credential-free check:
 ```
-curl -s https://stage.xbundle.com/ | grep -oE '<script[^>]*src="[^"]+"'
-curl -sI https://stage.xbundle.com/assets/<that-hash>.js | grep -i last-modified
+curl -s https://collate.xbundle.co.uk/ | grep -oE '<script[^>]*src="[^"]+"'
+curl -sI https://collate.xbundle.co.uk/assets/<that-hash>.js | grep -i last-modified
 ```
 The `Last-Modified` timestamp on the JS bundle is real, independent proof of *when* it was actually uploaded — a changed hash alone isn't quite enough to trust blindly. The same category of technique (checking real HTTP behavior with no credentials needed) also works for confirming the S3 bucket's CORS configuration is live: send an unauthenticated `OPTIONS` preflight straight to `https://edd-workbench-<env>-documents.s3.eu-west-2.amazonaws.com/<any-key>` with an `Origin` header — S3 evaluates CORS before checking auth.
 

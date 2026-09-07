@@ -36,3 +36,4 @@ export { extractZipMembers, type ZipMember } from "./extractors/zip.js";
 export { extractSevenZipMembers, type SevenZipMember } from "./extractors/sevenZip.js";
 export { iterateMboxMessages } from "./extractors/mbox.js";
 export { detectContentType, mimeTypeFor, type ContentType } from "./contentType.js";
+export { MATTER_STORAGE_QUOTA_BYTES, getMatterStorageUsedBytes, matterQuotaExceededMessage } from "./matterQuota.js";

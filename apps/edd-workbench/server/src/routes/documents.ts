@@ -14,6 +14,9 @@ import {
   MATTER_DOCUMENT_TREE_CTE,
   recordAuditEvent,
   deleteDocumentFromIndex,
+  MATTER_STORAGE_QUOTA_BYTES,
+  getMatterStorageUsedBytes,
+  matterQuotaExceededMessage,
 } from "@xbundle/edd-workbench-core";
 
 // Read at module-load time, matching auth.ts/pool.ts's "fail loudly at
@@ -36,11 +39,12 @@ interface InitUploadFile {
   lastModified?: number;
 }
 
-interface InitUploadResult {
-  documentId: string;
-  guid: string;
-  uploadUrl: string;
-}
+// A rejected file (over the matter's storage quota) comes back as
+// `{ error }` at that file's own array index, never omitted — the client
+// (runImport.ts) requires one result per requested file, in the same
+// order, so it can match each later file's real upload to the right
+// presigned URL.
+type InitUploadResult = { documentId: string; guid: string; uploadUrl: string } | { error: string };
 
 interface DocumentRow {
   id: string;
@@ -387,8 +391,20 @@ documentsRouter.post("/init-upload", async (req: Request<{ matterId: string }>, 
     }
 
     const results = await withOrgSession(orgId, async (client) => {
+      // One query for the batch, then an in-memory running total — not a
+      // fresh SUM per file — so files earlier in the same request count
+      // against files later in it (uploading two 2GB files in one batch
+      // against an empty matter must reject the second, not let both
+      // through because neither alone exceeds the quota on its own).
+      let usedBytes = await getMatterStorageUsedBytes(client, matterId);
       const created: InitUploadResult[] = [];
       for (const file of files) {
+        if (usedBytes + file.size > MATTER_STORAGE_QUOTA_BYTES) {
+          created.push({ error: matterQuotaExceededMessage(file.filename) });
+          continue;
+        }
+        usedBytes += file.size;
+
         const guidNumber = await nextMatterGuid(client, matterId);
         const documentId = randomUUID();
         const extension = file.filename.toLowerCase().split(".").pop() ?? "";

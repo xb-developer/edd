@@ -41,6 +41,24 @@ describe("runImport", () => {
     expect(succeeded.sort()).toEqual(["good1.txt", "good2.txt"]);
   });
 
+  it("turns a rejected ({ error }) initUpload result straight into a failure, never calling uploadOne for that file", async () => {
+    const files = [makeFile("small.txt"), makeFile("huge.txt")];
+    const uploadOneCalls: string[] = [];
+
+    const result = await runImport(files, {
+      initUpload: async (fs) =>
+        fs.map((file, i) =>
+          file.name === "huge.txt" ? { error: `"${file.name}" would exceed this matter's 3GB storage quota` } : { documentId: `doc-${i}`, guid: "000001", uploadUrl: `https://s3.example/${file.name}` },
+        ),
+      uploadOne: async (file) => {
+        uploadOneCalls.push(file.name);
+      },
+    });
+
+    expect(result.failures).toEqual([{ filename: "huge.txt", error: `"huge.txt" would exceed this matter's 3GB storage quota` }]);
+    expect(uploadOneCalls).toEqual(["small.txt"]);
+  });
+
   it("fails every file with the same reason when initUpload itself fails, rather than silently returning nothing", async () => {
     const files = [makeFile("a.txt"), makeFile("b.txt")];
     const settled: { name: string; error: string | null }[] = [];
@@ -101,7 +119,7 @@ describe("runImport", () => {
 
   it("passes each file's own initUpload result (matched by array index) to uploadOne", async () => {
     const files = [makeFile("first.txt"), makeFile("second.txt")];
-    const received: ImportInitResult[] = [];
+    const received: Extract<ImportInitResult, { documentId: string }>[] = [];
 
     await runImport(files, {
       initUpload: async (fs) => fakeInitResultsFor(fs),

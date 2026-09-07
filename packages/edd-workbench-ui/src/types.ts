@@ -118,12 +118,22 @@ export interface InitUploadFileDTO {
   lastModified?: number;
 }
 
-export interface InitUploadResultDTO {
-  documentId: string;
-  guid: string;
-  /** Presigned S3 PUT URL, 15-minute expiry — the client uploads the file's own bytes here directly, not through the app server. */
-  uploadUrl: string;
-}
+/**
+ * A rejected file (e.g. over the matter's 3GB storage quota — see
+ * matterQuota.ts/documents.ts's init-upload route) comes back as
+ * `{ error }` at that file's own index, never omitted — the server always
+ * returns one result per requested file, in the same order, so a shorter
+ * array would desync every later file's own upload from the wrong
+ * presigned URL.
+ */
+export type InitUploadResultDTO =
+  | {
+      documentId: string;
+      guid: string;
+      /** Presigned S3 PUT URL, 15-minute expiry — the client uploads the file's own bytes here directly, not through the app server. */
+      uploadUrl: string;
+    }
+  | { error: string };
 
 /** A create-job -> enqueue -> worker-builds-artifact -> poll -> presigned-download export job, real end to end (see exports.ts/handlers/export.ts) — not the earlier UI-only scaffolding. */
 export interface ExportJobDTO {

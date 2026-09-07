@@ -11,11 +11,15 @@ export interface UploadableFile {
   lastModified: number;
 }
 
-export interface ImportInitResult {
-  documentId: string;
-  guid: string;
-  uploadUrl: string;
-}
+/**
+ * A rejected file (e.g. over the matter's storage quota — see
+ * documents.ts's init-upload route) comes back as `{ error }` at that
+ * file's own index, never omitted — initUpload must return one result per
+ * input file, in the same order (see the `initUpload` doc below), so a
+ * shorter array would desync every later file's `uploadOne` call from the
+ * wrong presigned URL.
+ */
+export type ImportInitResult = { documentId: string; guid: string; uploadUrl: string } | { error: string };
 
 export interface ImportFailure {
   filename: string;
@@ -27,8 +31,8 @@ export interface RunImportDeps<F extends UploadableFile> {
   concurrency?: number;
   /** One batched call for the whole file list — mirrors init-upload's real contract (GUID assignment happens as one unit, not per file). Must return one result per input file, in the same order. */
   initUpload: (files: F[]) => Promise<ImportInitResult[]>;
-  /** The actual per-file work: PUT the bytes to S3, then call upload-complete. Runs inside the concurrency pool, one file at a time per worker slot. */
-  uploadOne: (file: F, init: ImportInitResult) => Promise<void>;
+  /** The actual per-file work: PUT the bytes to S3, then call upload-complete. Runs inside the concurrency pool, one file at a time per worker slot. Never called for a rejected (`{ error }`) init result — runImport turns those straight into a failure instead. */
+  uploadOne: (file: F, init: Extract<ImportInitResult, { documentId: string }>) => Promise<void>;
   /** Fires once per file, success or failure, as soon as that file settles — lets the caller update progress/refresh the document list incrementally rather than waiting for the whole batch. */
   onFileSettled?: (file: F, error: string | null) => void;
 }
@@ -68,8 +72,16 @@ export async function runImport<F extends UploadableFile>(files: F[], deps: RunI
     while (nextIndex < files.length) {
       const index = nextIndex++;
       const file = files[index];
+      const init = initResults[index];
+      // Rejected before any upload URL existed (e.g. over quota) — nothing
+      // to PUT, so this never reaches uploadOne at all.
+      if ("error" in init) {
+        failures.push({ filename: file.name, error: init.error });
+        deps.onFileSettled?.(file, init.error);
+        continue;
+      }
       try {
-        await deps.uploadOne(file, initResults[index]);
+        await deps.uploadOne(file, init);
         deps.onFileSettled?.(file, null);
       } catch (err) {
         const message = errorMessage(err);

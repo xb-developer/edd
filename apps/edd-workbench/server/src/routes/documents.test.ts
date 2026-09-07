@@ -3,7 +3,7 @@ import express from "express";
 import request from "supertest";
 import type { PoolClient } from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { pool, withOrgSession, initMatterGuidCounter, s3Client, DOCUMENTS_BUCKET, sqsClient } from "@xbundle/edd-workbench-core";
+import { pool, withOrgSession, initMatterGuidCounter, s3Client, DOCUMENTS_BUCKET, sqsClient, MATTER_STORAGE_QUOTA_BYTES } from "@xbundle/edd-workbench-core";
 import { CreateBucketCommand, HeadBucketCommand, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { CreateQueueCommand, ReceiveMessageCommand, PurgeQueueCommand } from "@aws-sdk/client-sqs";
 import { documentsRouter } from "./documents.js";
@@ -243,6 +243,96 @@ describe("documents router — init-upload", () => {
     const app = buildTestApp({ orgId, userId, role: "admin", email: "tester@example.com" });
     const response = await request(app).post(`/api/matters/${matterId}/documents/init-upload`).send({ files: [] });
     expect(response.status).toBe(400);
+  });
+});
+
+describe("documents router — init-upload storage quota", () => {
+  it("rejects a single file that alone would exceed the matter's 3GB quota, creating no document row", async () => {
+    const { orgId, matterId, userId } = await createTestOrgAndMatter("init-upload-quota-single");
+    try {
+      const app = buildTestApp({ orgId, userId, role: "admin", email: "tester@example.com" });
+      const response = await request(app)
+        .post(`/api/matters/${matterId}/documents/init-upload`)
+        .send({ files: [{ filename: "huge.zip", size: MATTER_STORAGE_QUOTA_BYTES + 1 }] });
+
+      expect(response.status).toBe(201);
+      expect(response.body).toEqual([{ error: `"huge.zip" would exceed this matter's 3GB storage quota` }]);
+
+      const rows = await withOrgSession(orgId, (client) => client.query("SELECT 1 FROM documents WHERE matter_id = $1", [matterId]));
+      expect(rows.rowCount).toBe(0);
+    } finally {
+      await deleteTestOrg(orgId);
+    }
+  });
+
+  it("allows a file that exactly fills the remaining quota, and rejects the very next byte", async () => {
+    const { orgId, matterId, userId } = await createTestOrgAndMatter("init-upload-quota-exact");
+    try {
+      const app = buildTestApp({ orgId, userId, role: "admin", email: "tester@example.com" });
+      const response = await request(app)
+        .post(`/api/matters/${matterId}/documents/init-upload`)
+        .send({
+          files: [
+            { filename: "exact-fit.zip", size: MATTER_STORAGE_QUOTA_BYTES },
+            { filename: "one-byte-too-many.txt", size: 1 },
+          ],
+        });
+
+      expect(response.status).toBe(201);
+      expect(response.body[0]).toMatchObject({ documentId: expect.any(String) });
+      expect(response.body[1]).toEqual({ error: `"one-byte-too-many.txt" would exceed this matter's 3GB storage quota` });
+    } finally {
+      await deleteTestOrg(orgId);
+    }
+  });
+
+  it("counts an earlier file in the same batch against a later one, even though each alone fits the quota", async () => {
+    const { orgId, matterId, userId } = await createTestOrgAndMatter("init-upload-quota-batch");
+    try {
+      const app = buildTestApp({ orgId, userId, role: "admin", email: "tester@example.com" });
+      const twoGb = 2 * 1024 * 1024 * 1024;
+      const response = await request(app)
+        .post(`/api/matters/${matterId}/documents/init-upload`)
+        .send({
+          files: [
+            { filename: "first-2gb.zip", size: twoGb },
+            { filename: "second-2gb.zip", size: twoGb },
+          ],
+        });
+
+      expect(response.status).toBe(201);
+      expect(response.body[0]).toMatchObject({ documentId: expect.any(String) });
+      expect(response.body[1]).toEqual({ error: `"second-2gb.zip" would exceed this matter's 3GB storage quota` });
+
+      const rows = await withOrgSession(orgId, (client) => client.query("SELECT original_filename FROM documents WHERE matter_id = $1", [matterId]));
+      expect(rows.rows).toEqual([{ original_filename: "first-2gb.zip" }]);
+    } finally {
+      await deleteTestOrg(orgId);
+    }
+  });
+
+  it("counts documents already in the matter (not just the current batch) against the quota", async () => {
+    const { orgId, matterId, userId } = await createTestOrgAndMatter("init-upload-quota-existing");
+    try {
+      const app = buildTestApp({ orgId, userId, role: "admin", email: "tester@example.com" });
+      const existingDocumentId = randomUUID();
+      await withOrgSession(orgId, (client) =>
+        client.query(
+          `INSERT INTO documents (id, org_id, matter_id, guid_number, original_filename, extension, size_bytes, s3_key, content_type_detected, ingest_status, family_document_id, depth)
+           VALUES ($1, $2, $3, 1, 'already-uploaded.zip', 'zip', $4, 'tenants/test/x/original.zip', 'zip', 'ready', $1, 0)`,
+          [existingDocumentId, orgId, matterId, MATTER_STORAGE_QUOTA_BYTES - 100],
+        ),
+      );
+
+      const response = await request(app)
+        .post(`/api/matters/${matterId}/documents/init-upload`)
+        .send({ files: [{ filename: "just-over.txt", size: 200 }] });
+
+      expect(response.status).toBe(201);
+      expect(response.body).toEqual([{ error: `"just-over.txt" would exceed this matter's 3GB storage quota` }]);
+    } finally {
+      await deleteTestOrg(orgId);
+    }
   });
 });
 

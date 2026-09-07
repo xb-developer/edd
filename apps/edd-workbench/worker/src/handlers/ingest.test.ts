@@ -10,7 +10,16 @@ import * as XLSX from "@e965/xlsx";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { PutObjectCommand, CreateBucketCommand, HeadBucketCommand, GetObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { CreateQueueCommand, ReceiveMessageCommand, PurgeQueueCommand } from "@aws-sdk/client-sqs";
-import { pool, withOrgSession, initMatterGuidCounter, nextMatterGuid, s3Client, sqsClient, DOCUMENTS_BUCKET } from "@xbundle/edd-workbench-core";
+import {
+  pool,
+  withOrgSession,
+  initMatterGuidCounter,
+  nextMatterGuid,
+  s3Client,
+  sqsClient,
+  DOCUMENTS_BUCKET,
+  MATTER_STORAGE_QUOTA_BYTES,
+} from "@xbundle/edd-workbench-core";
 import { handleIngestMessage } from "./ingest.js";
 
 const FIXTURE_EML = Buffer.from(
@@ -1397,6 +1406,61 @@ describe("handleIngestMessage", () => {
     const processedEmlMember = await getDocument(orgId, emlMember.id);
     expect(processedEmlMember.ingest_status).toBe("ready");
     expect(processedEmlMember.subject).toBe("Draft witness statement");
+  });
+
+  it("rejects only the member(s) that would push the matter over its 3GB quota, keeping the ones that still fit — the container's own row survives with the rejection recorded, same as any other partial-member failure", async () => {
+    const zip = new JSZip();
+    zip.file("fits.txt", "short enough to fit in the remaining quota");
+    zip.file("too-big.txt", "this one alone still fits the quota, but not once fits.txt already used some of it");
+    const buffer = await zip.generateAsync({ type: "nodebuffer" });
+
+    const { orgId, documentId } = await setupDocument({ filename: "production-set.zip", contentTypeDetected: "zip", body: buffer });
+    currentOrgId = orgId;
+    const matterIdRow = await withOrgSession(orgId, (client) =>
+      client.query<{ matter_id: string }>("SELECT matter_id FROM documents WHERE id = $1", [documentId]),
+    );
+    const matterId = matterIdRow.rows[0].matter_id;
+
+    // Pre-fills the matter to within a few bytes of quota so that the
+    // zip's own two (tiny, real) members split cleanly across the
+    // boundary — no multi-gigabyte fixture needed to exercise the real
+    // check. "fits.txt" is 42 bytes; "too-big.txt" is 82 bytes — with 50
+    // bytes of headroom left once expansion starts, fits.txt leaves only 8
+    // bytes remaining, which too-big.txt's own 82 bytes then exceeds. The
+    // zip document's own row (its compressed size_bytes) already counts
+    // toward the matter's total at this point too — computed against the
+    // real current total, not assumed to be zero, so this works regardless
+    // of exactly how many bytes the generated archive itself compresses to.
+    const usedBeforePrefill = await withOrgSession(orgId, (client) =>
+      client.query<{ total: string | null }>("SELECT SUM(size_bytes) AS total FROM documents WHERE matter_id = $1", [matterId]),
+    );
+    const existingDocumentId = randomUUID();
+    await withOrgSession(orgId, async (client) => {
+      const guidNumber = await nextMatterGuid(client, matterId);
+      await client.query(
+        `INSERT INTO documents (id, org_id, matter_id, guid_number, original_filename, extension, size_bytes, s3_key, content_type_detected, ingest_status, family_document_id, depth)
+         VALUES ($1, $2, $3, $4, 'already-uploaded.bin', 'bin', $5, 'tenants/test/x/original.bin', 'other', 'ready', $1, 0)`,
+        [existingDocumentId, orgId, matterId, guidNumber, MATTER_STORAGE_QUOTA_BYTES - 50 - Number(usedBeforePrefill.rows[0].total ?? 0)],
+      );
+    });
+
+    await handleIngestMessage(JSON.stringify({ documentId, orgId }));
+
+    // Partial failure — the container's own row survives (not the "fully
+    // successful, delete it" path), same shape as any other member-level
+    // failure (see finalizeTransparentContainer's own comment).
+    const container = await getDocument(orgId, documentId);
+    expect(container.ingest_status).toBe("ready");
+    expect(container.metadata).toEqual({
+      memberCount: 1,
+      failedMemberCount: 1,
+      failures: [{ filename: "too-big.txt", error: `"too-big.txt" would exceed this matter's 3GB storage quota` }],
+    });
+
+    const members = await withOrgSession(orgId, (client) =>
+      client.query("SELECT original_filename FROM documents WHERE matter_id = $1 AND metadata->>'source' = 'zip'", [matterId]),
+    );
+    expect(members.rows).toEqual([{ original_filename: "fits.txt" }]);
   });
 
   it("a zip arriving nested (as if it were an email's own attachment) passes its members through to the EMAIL's family, not a fresh independent one", async () => {

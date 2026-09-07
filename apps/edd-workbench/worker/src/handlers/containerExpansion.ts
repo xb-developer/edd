@@ -20,6 +20,9 @@ import {
   iterateMboxMessages,
   DOCUMENTS_BUCKET,
   deleteDocumentFromIndex,
+  MATTER_STORAGE_QUOTA_BYTES,
+  getMatterStorageUsedBytes,
+  matterQuotaExceededMessage,
   type ContentType,
 } from "@xbundle/edd-workbench-core";
 
@@ -157,8 +160,21 @@ export async function expandMembers(params: {
   let succeeded = 0;
   if (params.depth >= MAX_CONTAINER_EXPANSION_DEPTH) return { succeeded, failures, depthCapped: true };
 
+  // One query up front, then an in-memory running total across this
+  // container's own (sequential) member loop — matches documents.ts's own
+  // init-upload quota check exactly, so two members inside the same
+  // container count against each other the same way two files in the same
+  // upload batch do. A member that doesn't fit gets no document row, no S3
+  // object, and no re-enqueue — same as any other per-member failure, just
+  // recorded with a quota-specific message rather than a thrown error.
+  let usedBytes = await withOrgSession(params.orgId, (client) => getMatterStorageUsedBytes(client, params.matterId));
+
   for await (const member of params.members) {
     if (member.content.byteLength === 0) continue;
+    if (usedBytes + member.content.byteLength > MATTER_STORAGE_QUOTA_BYTES) {
+      failures.push({ filename: member.filename, error: matterQuotaExceededMessage(member.filename) });
+      continue;
+    }
     try {
       await withOrgSession(params.orgId, async (client) => {
         const extension = member.filename.toLowerCase().split(".").pop() ?? "";
@@ -205,6 +221,7 @@ export async function expandMembers(params: {
         );
       });
       succeeded++;
+      usedBytes += member.content.byteLength;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`expandMembers: failed to expand member "${member.filename}":`, err);

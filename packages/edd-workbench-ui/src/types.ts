@@ -34,14 +34,6 @@ export interface AskResultDTO {
   relevantDocuments: { documentId: string; guid: string; filename: string }[];
 }
 
-/** The caller's own running AI token usage, broken down by call site (see aiUsage.ts) plus their sum. */
-export interface AiUsageDTO {
-  embedding: number;
-  ask: number;
-  summarization: number;
-  total: number;
-}
-
 /** A matter-scoped full-text search result — see search.ts. totalHits may exceed documentIds.length if the match count was capped server-side. */
 export interface SearchResultDTO {
   documentIds: string[];
@@ -143,17 +135,24 @@ export interface ExportJobDTO {
   error: string | null;
 }
 
-/** One queue's liveness — see workerStatus.ts. Null fields mean "no data yet" (e.g. the worker hasn't ticked since deploy), not an error. */
+/**
+ * One queue's status — see workerStatus.ts. `heartbeat` is the worker
+ * process's own liveness (org/matter-independent — there's only one worker
+ * process, not one per tenant); null means "no data yet" (e.g. the worker
+ * hasn't ticked since deploy), not an error. `queued`/`ok`/`failed` are
+ * this specific matter's own document (ingest queue) or export-job (export
+ * queue) counts, not the queue's global lifetime/depth totals.
+ */
 export interface WorkerQueueStatusDTO {
   name: string;
   heartbeat: {
     queueName: string;
     lastTickAt: string | null;
     processingStartedAt: string | null;
-    processedTotal: number;
-    failedTotal: number;
   } | null;
-  approximateMessages: number | null;
+  queued: number;
+  ok: number;
+  failed: number;
 }
 
 export interface WorkerStatusDTO {

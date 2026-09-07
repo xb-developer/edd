@@ -4,6 +4,7 @@ import type { WorkerStatusDTO, SearchHealthDTO } from "./types";
 
 export interface WorkerHealthBarProps {
   api: ApiClient;
+  matterId: string;
 }
 
 const POLL_INTERVAL_MS = 4000;
@@ -29,10 +30,12 @@ function secondsAgo(iso: string | null): number | null {
  * Live worker status in the topbar (see EddWorkbenchWorkspace.tsx) — the
  * Processing Status panel's "worker health bar" from the POC, ported as a
  * persistent indicator rather than a togglable panel, since it's cheap
- * enough to just always show. Polls GET /api/worker-status, available to
- * any authenticated caller.
+ * enough to just always show. Polls GET /matters/:matterId/worker-status —
+ * the queued/ok/failed counts are this specific matter's own (re-fetched
+ * on every matter switch), while the stalled/working/idle liveness label
+ * reflects the one shared worker process, not this matter specifically.
  */
-export function WorkerHealthBar({ api }: WorkerHealthBarProps) {
+export function WorkerHealthBar({ api, matterId }: WorkerHealthBarProps) {
   const [status, setStatus] = useState<WorkerStatusDTO | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [searchHealth, setSearchHealth] = useState<SearchHealthDTO | null>(null);
@@ -41,10 +44,15 @@ export function WorkerHealthBar({ api }: WorkerHealthBarProps) {
   useEffect(() => {
     mountedRef.current = true;
     let timer: ReturnType<typeof setTimeout>;
+    // The counts below are this matter's own — clear the previous matter's
+    // numbers immediately on switch rather than showing them stale until
+    // the next poll tick lands.
+    setStatus(null);
+    setError(null);
 
     async function tick() {
       try {
-        const result = await api.getWorkerStatus();
+        const result = await api.getWorkerStatus(matterId);
         if (mountedRef.current) {
           setStatus(result);
           setError(null);
@@ -61,7 +69,7 @@ export function WorkerHealthBar({ api }: WorkerHealthBarProps) {
       mountedRef.current = false;
       clearTimeout(timer);
     };
-  }, [api]);
+  }, [api, matterId]);
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>;
@@ -99,9 +107,7 @@ export function WorkerHealthBar({ api }: WorkerHealthBarProps) {
         const working = queue.heartbeat?.processingStartedAt != null;
         return (
           <span key={queue.name} className={`worker-health-chip${stalled ? " stalled" : ""}`} title={queue.heartbeat?.queueName}>
-            {queue.name}: {stalled ? "stalled" : working ? "working" : "idle"}
-            {queue.approximateMessages !== null && ` · ${queue.approximateMessages} queued`}
-            {queue.heartbeat && ` · ${queue.heartbeat.processedTotal} ok / ${queue.heartbeat.failedTotal} failed`}
+            {queue.name}: {stalled ? "stalled" : working ? "working" : "idle"} · {queue.queued} queued · {queue.ok} ok / {queue.failed} failed
           </span>
         );
       })}

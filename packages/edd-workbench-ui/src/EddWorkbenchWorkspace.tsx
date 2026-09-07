@@ -4,7 +4,6 @@ import type { MatterDTO } from "./types";
 import { MatterDetail } from "./MatterDetail";
 import { closeViewerWindowForMatter } from "./viewer-window/useViewerWindow";
 import { WorkerHealthBar } from "./WorkerHealthBar";
-import { AiUsageBadge } from "./AiUsageBadge";
 
 export interface EddWorkbenchWorkspaceProps {
   /** Defaults to the standalone app's own local server. A future host embedding this component elsewhere can point it at a different origin. */
@@ -287,8 +286,7 @@ export function EddWorkbenchWorkspace({ apiBaseUrl = "http://localhost:4430/api"
             </h1>
           )}
         </div>
-        <WorkerHealthBar api={api} />
-        <AiUsageBadge api={api} />
+        <WorkerHealthBar api={api} matterId={selectedMatter.id} />
         {onLogout && (
           <button type="button" className="topbar-btn" onClick={handleLogout}>
             Log out

@@ -75,7 +75,6 @@ app.get("/api/me", (req, res) => {
 });
 
 app.use("/api/audit", auditRouter);
-app.use("/api/worker-status", workerStatusRouter);
 app.use("/api/ai-usage", aiUsageRouter);
 app.use("/api/search-health", searchHealthRouter);
 app.use("/api/matters", mattersRouter);
@@ -93,6 +92,10 @@ app.use("/api/matters/:matterId/members", matterMembersRouter);
 app.use("/api/matters/:matterId/audit-load", matterAuditRouter);
 app.use("/api/matters/:matterId/ask", askRouter);
 app.use("/api/matters/:matterId/search", searchRouter);
+// Moved from the old bare "/api/worker-status" — its queued/ok/failed
+// counts are this matter's own now (see workerStatus.ts's own comment),
+// so it needs requireMatterAccess() like every other router on this line.
+app.use("/api/matters/:matterId/worker-status", workerStatusRouter);
 
 interface HttpError {
   status?: number;

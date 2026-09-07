@@ -10,7 +10,6 @@ import type {
   MatterMemberCandidateDTO,
   WorkerStatusDTO,
   AskResultDTO,
-  AiUsageDTO,
   SearchResultDTO,
   SearchHealthDTO,
 } from "./types";
@@ -169,8 +168,8 @@ export function createApiClient(baseUrl: string, getAccessToken: () => Promise<s
     /** Best-effort, called right before the actual Auth0 logout redirect — never let a failure here block logout. */
     recordLogout: () => request<void>("/audit/logout", { method: "POST" }),
 
-    /** Live queue depth plus each queue's own worker heartbeat, backing the topbar's WorkerHealthBar. Available to any authenticated caller. */
-    getWorkerStatus: () => request<WorkerStatusDTO>("/worker-status"),
+    /** This matter's live ingest/export processing counts, plus each queue's own (org/matter-independent) worker heartbeat — backs the topbar's WorkerHealthBar. */
+    getWorkerStatus: (matterId: string) => request<WorkerStatusDTO>(`/matters/${matterId}/worker-status`),
 
     /** May take several seconds (embeds the question, does a similarity search, then a real generation call) and 503s outside the self-hosted GPU services' business-hours schedule — see ask.ts. */
     askQuestion: (matterId: string, question: string) =>
@@ -178,9 +177,6 @@ export function createApiClient(baseUrl: string, getAccessToken: () => Promise<s
         method: "POST",
         body: JSON.stringify({ question }),
       }),
-
-    /** The caller's own running token usage across the self-hosted AI services, broken down by call site — backs the topbar's AiUsageBadge. */
-    getAiUsage: () => request<AiUsageDTO>("/ai-usage/me"),
 
     /** Boolean/phrase-exact full-text search over this matter's documents (self-hosted Elasticsearch — see search.ts). Empty/blank query returns no results without a real request. */
     searchDocuments: (matterId: string, query: string) =>

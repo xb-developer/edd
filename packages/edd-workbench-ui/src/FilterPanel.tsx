@@ -195,6 +195,7 @@ export function FilterPanel({
         <input
           className="search-box"
           placeholder='Search documents… ("exact phrase", +required, -excluded)'
+          title='Search documents… ("exact phrase", +required, -excluded)'
           value={searchQuery}
           onChange={(e) => onSearchQueryChange(e.target.value)}
         />
@@ -217,7 +218,7 @@ export function FilterPanel({
         />
         {askError && <p className="bulk-note">{askError}</p>}
         <div className="ask-row">
-          <button type="button" className="clear-filters" onClick={handleClearQuestion} disabled={!question && !askError}>
+          <button type="button" className="pop-out-btn" onClick={handleClearQuestion} disabled={!question && !askError}>
             Clear
           </button>
           <button type="button" className="pop-out-btn" onClick={handleAsk} disabled={!question.trim() || asking}>

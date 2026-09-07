@@ -252,18 +252,7 @@ export function EddWorkbenchWorkspace({ apiBaseUrl = "http://localhost:4430/api"
             </option>
           ))}
         </select>
-        {canCreateMatters && (
-          <button type="button" className="topbar-btn" style={{ marginLeft: 0 }} onClick={handleCreateMatter} disabled={creating}>
-            {creating ? "Creating…" : "Create Matter"}
-          </button>
-        )}
-        {canDeleteMatter && (
-          <button type="button" className="topbar-btn" style={{ marginLeft: 0 }} onClick={handleDeleteMatter} disabled={deletingMatter}>
-            {deletingMatter ? "Deleting…" : "Delete Matter"}
-          </button>
-        )}
         <div className="brand">
-          <span className="mark">Co</span>
           {editingName ? (
             <input
               className="matter-name-input"
@@ -286,6 +275,16 @@ export function EddWorkbenchWorkspace({ apiBaseUrl = "http://localhost:4430/api"
             </h1>
           )}
         </div>
+        {canCreateMatters && (
+          <button type="button" className="topbar-btn" style={{ marginLeft: 0 }} onClick={handleCreateMatter} disabled={creating}>
+            {creating ? "Creating…" : "Create Matter"}
+          </button>
+        )}
+        {canDeleteMatter && (
+          <button type="button" className="topbar-btn" style={{ marginLeft: 0 }} onClick={handleDeleteMatter} disabled={deletingMatter}>
+            {deletingMatter ? "Deleting…" : "Delete Matter"}
+          </button>
+        )}
         <WorkerHealthBar api={api} matterId={selectedMatter.id} />
         {onLogout && (
           <button type="button" className="topbar-btn" onClick={handleLogout}>

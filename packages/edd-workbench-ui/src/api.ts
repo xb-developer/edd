@@ -69,6 +69,9 @@ export function createApiClient(baseUrl: string, getAccessToken: () => Promise<s
         body: JSON.stringify({ name }),
       }),
 
+    /** Admin-only server-side (see matters.ts's own DELETE route) — deletes every document, tag, member grant, and export in the matter too. */
+    deleteMatter: (id: string) => request<void>(`/matters/${id}`, { method: "DELETE" }),
+
     getMatterDocuments: (matterId: string) => request<DocumentDTO[]>(`/matters/${matterId}/documents`),
 
     getDocument: (matterId: string, documentId: string) => request<DocumentDTO>(`/matters/${matterId}/documents/${documentId}`),

@@ -35,6 +35,7 @@ export function EddWorkbenchWorkspace({ apiBaseUrl = "http://localhost:4430/api"
   // creator). Fetched once; doesn't change per matter.
   const [me, setMe] = useState<{ userId: string; role: string } | null>(null);
   const [creating, setCreating] = useState(false);
+  const [deletingMatter, setDeletingMatter] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState("");
   // Guards against a commit firing twice (e.g. Enter's own blur plus a
@@ -101,6 +102,38 @@ export function EddWorkbenchWorkspace({ apiBaseUrl = "http://localhost:4430/api"
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Whoever successfully calls this is always an admin (server-side
+  // requireRole("admin") on the DELETE route — see matters.ts) — so a
+  // zero-matters aftermath always gets the same "skip straight to a fresh
+  // one" treatment as a brand-new org's bootstrap above, rather than
+  // falling into the `matters?.length === 0` "ask an admin to add you"
+  // screen below, which would be nonsensical for the admin who just did
+  // the deleting.
+  async function handleDeleteMatter() {
+    if (!selectedMatter) return;
+    if (!window.confirm(`Delete matter "${selectedMatter.name}"? Every document, tag, and export in it will be deleted too. This cannot be undone.`)) return;
+    setDeletingMatter(true);
+    try {
+      setError(null);
+      await api.deleteMatter(selectedMatter.id);
+      closeViewerWindowForMatter(selectedMatter.id);
+      const remaining = (matters ?? []).filter((m) => m.id !== selectedMatter.id);
+      if (remaining.length > 0) {
+        setMatters(remaining);
+        selectMatter(remaining[0].id);
+      } else {
+        const created = await api.createMatter("New matter");
+        setMatters([created]);
+        selectMatter(created.id);
+        startEditingName(created.name);
+      }
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setDeletingMatter(false);
+    }
+  }
+
   async function handleCreateMatter() {
     setCreating(true);
     try {
@@ -158,6 +191,10 @@ export function EddWorkbenchWorkspace({ apiBaseUrl = "http://localhost:4430/api"
   }
 
   const canCreateMatters = me?.role === "admin" || me?.role === "litigation_support";
+  // Narrower than canCreateMatters — admin only, matching the server's own
+  // requireRole("admin") on the DELETE route (deleting a matter is a much
+  // bigger blast radius than creating or renaming one).
+  const canDeleteMatter = me?.role === "admin";
 
   // Distinct from the plain "still loading" case below — this is a known,
   // final state (the fetch succeeded; there's just nothing this user can
@@ -219,6 +256,11 @@ export function EddWorkbenchWorkspace({ apiBaseUrl = "http://localhost:4430/api"
         {canCreateMatters && (
           <button type="button" className="topbar-btn" style={{ marginLeft: 0 }} onClick={handleCreateMatter} disabled={creating}>
             {creating ? "Creating…" : "Create Matter"}
+          </button>
+        )}
+        {canDeleteMatter && (
+          <button type="button" className="topbar-btn" style={{ marginLeft: 0 }} onClick={handleDeleteMatter} disabled={deletingMatter}>
+            {deletingMatter ? "Deleting…" : "Delete Matter"}
           </button>
         )}
         <div className="brand">

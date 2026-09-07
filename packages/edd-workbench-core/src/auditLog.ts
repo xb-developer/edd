@@ -9,6 +9,7 @@ import type { PoolClient } from "pg";
 export type AuditAction =
   | "logout"
   | "matter.create"
+  | "matter.delete"
   | "matter.load"
   | "document.upload"
   | "document.delete"

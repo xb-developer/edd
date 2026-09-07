@@ -1,5 +1,6 @@
-import { Router } from "express";
-import { withOrgSession, initMatterGuidCounter, recordAuditEvent } from "@xbundle/edd-workbench-core";
+import { Router, type Request } from "express";
+import { DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { withOrgSession, initMatterGuidCounter, recordAuditEvent, s3Client, DOCUMENTS_BUCKET, deleteDocumentFromIndex } from "@xbundle/edd-workbench-core";
 import { requireRole, requireMatterAccess } from "../auth.js";
 
 export const mattersRouter = Router();
@@ -156,6 +157,78 @@ mattersRouter.patch("/:matterId", requireRole("admin", "litigation_support"), re
     }
 
     res.json(toMatterDTO(updated.rows[0]));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Admin-only, deliberately narrower than create/rename's admin +
+// litigation_support — deleting a whole matter (every document, tag,
+// member grant, and export in it, via ON DELETE CASCADE) is a much bigger
+// blast radius than creating or renaming one. requireMatterAccess() isn't
+// needed alongside requireRole("admin") here (unlike PATCH, which also
+// allows litigation_support) — admin already bypasses matter_members
+// entirely, so it would be a no-op check.
+mattersRouter.delete("/:matterId", requireRole("admin"), async (req: Request<{ matterId: string }>, res, next) => {
+  try {
+    const { orgId, userId } = req.eddContext!;
+    const { matterId } = req.params;
+
+    const matter = await withOrgSession(orgId, (client) =>
+      client.query<{ name: string }>("SELECT name FROM matters WHERE id = $1 AND org_id = $2", [matterId, orgId]),
+    );
+    if (matter.rowCount === 0) {
+      res.status(404).json({ error: "Matter not found" });
+      return;
+    }
+
+    // Every document in the matter needs its own S3 object and search-index
+    // entry cleaned up — cascading the `matters` row wipes every `documents`
+    // row (and, transitively, their document_chunks) automatically, but S3
+    // keys carry no relationship to matter/tree position (see
+    // deleteDocumentsWithS3Cleanup's own comment), so those have to be
+    // collected and deleted explicitly, the same as that route does.
+    const documents = await withOrgSession(orgId, async (client) => {
+      const docs = await client.query<{ id: string; s3_key: string }>("SELECT id, s3_key FROM documents WHERE matter_id = $1", [matterId]);
+
+      // Recorded before the DELETE below, while the matter row still exists
+      // (audit_log.matter_id is a real FK) — migration 023's ON DELETE SET
+      // NULL then nulls it out the instant the DELETE cascades, same as
+      // every other audit row for this matter. The rendered description is
+      // what keeps this event meaningful afterward, matching document.delete's
+      // own precedent of never relying on the deleted row's id.
+      await recordAuditEvent(client, {
+        orgId,
+        actorUserId: userId,
+        matterId,
+        action: "matter.delete",
+        description: `Deleted matter "${matter.rows[0].name}"`,
+      });
+
+      await client.query("DELETE FROM matters WHERE id = $1 AND org_id = $2", [matterId, orgId]);
+
+      return docs.rows;
+    });
+
+    // Best-effort, same as deleteDocumentsWithS3Cleanup — the DB rows
+    // (already gone via cascade) are what the rest of the app treats as
+    // "does this exist"; S3/search-index staleness is logged, not thrown.
+    await Promise.all(
+      documents.map((doc) =>
+        s3Client.send(new DeleteObjectCommand({ Bucket: DOCUMENTS_BUCKET, Key: doc.s3_key })).catch((err) => {
+          console.error(`Failed to delete S3 object ${doc.s3_key} during deletion of matter ${matterId}:`, err);
+        }),
+      ),
+    );
+    await Promise.all(
+      documents.map((doc) =>
+        deleteDocumentFromIndex(doc.id).catch((err) => {
+          console.error(`Failed to remove search index entry for document ${doc.id} during deletion of matter ${matterId}:`, err);
+        }),
+      ),
+    );
+
+    res.status(204).send();
   } catch (err) {
     next(err);
   }

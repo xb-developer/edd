@@ -186,24 +186,40 @@ documentsRouter.get("/:id", async (req: Request<{ matterId: string; id: string }
 // Shared by both the single-document and bulk-delete routes below. Deletes
 // every id in `documentIds` (and, via ON DELETE CASCADE on
 // parent_document_id, any attachments expanded from each — see ingest.ts).
-// Best-effort S3 cleanup for the documents themselves and their direct
-// children only — a grandchild (an attachment that was itself an email
-// with its own attachments) would still cascade-delete at the DB level but
-// leave its S3 object orphaned; a storage-cleanup gap, not a correctness
-// one, and not worth a recursive query for a first pass at this feature.
+// S3 cleanup walks the FULL descendant tree (a recursive query, not just
+// direct children) — a grandchild (an attachment that was itself an email
+// with its own attachments) cascade-deletes at the DB level regardless of
+// depth, so S3 cleanup has to match that or leave objects orphaned. S3
+// object keys carry no relationship to their document's tree position
+// (each document's key is `.../documents/{its-own-uuid}/original.ext`,
+// independent of parent — see containerExpansion.ts), so there's no
+// key-prefix shortcut for this; the recursive walk over parent_document_id
+// is the only way to enumerate every descendant's own key before the rows
+// (and the parent/child links used to find them) disappear.
 // S3 failures are logged, not thrown — the DB rows (the thing the rest of
 // the app actually treats as "does this document exist") are the part
 // that must not silently fail to delete.
 async function deleteDocumentsWithS3Cleanup(orgId: string, actorUserId: string, matterId: string, documentIds: string[]): Promise<number> {
   const deletedRows = await withOrgSession(orgId, async (client) => {
     const rows = await client.query<{ id: string; s3_key: string; original_filename: string }>(
-      "SELECT id, s3_key, original_filename FROM documents WHERE matter_id = $1 AND (id = ANY($2::uuid[]) OR parent_document_id = ANY($2::uuid[]))",
+      `WITH RECURSIVE descendants AS (
+         SELECT id, s3_key, original_filename, parent_document_id
+         FROM documents
+         WHERE matter_id = $1 AND id = ANY($2::uuid[])
+         UNION ALL
+         SELECT c.id, c.s3_key, c.original_filename, c.parent_document_id
+         FROM documents c
+         JOIN descendants d ON c.parent_document_id = d.id
+         WHERE c.matter_id = $1
+       )
+       SELECT id, s3_key, original_filename FROM descendants`,
       [matterId, documentIds],
     );
     await client.query("DELETE FROM documents WHERE matter_id = $1 AND id = ANY($2::uuid[])", [matterId, documentIds]);
-    // One row per document actually removed — including cascade-deleted
-    // children (e.g. an email's own attachments), not just the ids the
-    // caller explicitly requested, since those rows disappear too.
+    // One row per document actually removed — including every
+    // cascade-deleted descendant (e.g. an email's own attachments, and
+    // their own attachments in turn), not just the ids the caller
+    // explicitly requested, since those rows disappear too.
     for (const row of rows.rows) {
       await recordAuditEvent(client, {
         orgId,

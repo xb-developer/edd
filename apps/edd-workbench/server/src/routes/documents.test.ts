@@ -62,6 +62,13 @@ async function insertTestDocument(
     contentType: string;
     ingestStatus: string;
     parentDocumentId?: string;
+    /** Override for a depth-2+ case (a grandchild's real family root is its
+     * grandparent, not its immediate parent) — every existing call site
+     * nests at most one level deep, so this defaults the same way it always
+     * has when omitted. */
+    familyDocumentId?: string;
+    /** Override for a depth-2+ case — defaults to the existing 0/1 inference (childless-or-direct-child) when omitted. */
+    depth?: number;
     title?: string | null;
     author?: string | null;
     subject?: string | null;
@@ -70,8 +77,8 @@ async function insertTestDocument(
   },
 ): Promise<string> {
   const documentId = randomUUID();
-  const familyDocumentId = params.parentDocumentId ?? documentId;
-  const depth = params.parentDocumentId ? 1 : 0;
+  const familyDocumentId = params.familyDocumentId ?? params.parentDocumentId ?? documentId;
+  const depth = params.depth ?? (params.parentDocumentId ? 1 : 0);
   await client.query(
     `INSERT INTO documents (id, org_id, matter_id, parent_document_id, family_document_id, depth, guid_number, original_filename, extension, size_bytes, s3_key, content_type_detected, ingest_status, title, author, subject, doc_date, metadata)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
@@ -942,6 +949,76 @@ describe("documents router — delete", () => {
       client.query("SELECT description FROM audit_log WHERE matter_id = $1 AND action = 'document.delete' ORDER BY description", [matterId]),
     );
     expect(audit.rows.map((r) => r.description)).toEqual(['Deleted file "attachment.pdf"', 'Deleted file "covering-email.eml"']);
+  });
+
+  it("cascade-deletes a grandchild's S3 object too (a nested attachment's own attachment) — regression test for the recursive-descendant S3 cleanup", async () => {
+    const { orgId, matterId, userId } = await createTestOrgAndMatter("delete-doc-grandchild");
+    orgIdsToClean.push(orgId);
+
+    // PST -> nested.eml -> its own attachment.pdf: deleting the PST-level
+    // root must reach all the way down, not just its direct child.
+    const rootKey = `tenants/test/documents/${randomUUID()}/original.pst`;
+    const childKey = `tenants/test/documents/${randomUUID()}/original.eml`;
+    const grandchildKey = `tenants/test/documents/${randomUUID()}/original.pdf`;
+    await s3Client.send(new PutObjectCommand({ Bucket: DOCUMENTS_BUCKET, Key: rootKey, Body: Buffer.from("pst") }));
+    await s3Client.send(new PutObjectCommand({ Bucket: DOCUMENTS_BUCKET, Key: childKey, Body: Buffer.from("email") }));
+    await s3Client.send(new PutObjectCommand({ Bucket: DOCUMENTS_BUCKET, Key: grandchildKey, Body: Buffer.from("attachment") }));
+
+    const { rootId, grandchildId } = await withOrgSession(orgId, async (client) => {
+      const rootId = await insertTestDocument(client, {
+        orgId,
+        matterId,
+        guidNumber: 1,
+        filename: "mailbox.pst",
+        extension: "pst",
+        sizeBytes: 100,
+        s3Key: rootKey,
+        contentType: "pst",
+        ingestStatus: "ready",
+      });
+      const childId = await insertTestDocument(client, {
+        orgId,
+        matterId,
+        guidNumber: 2,
+        filename: "nested.eml",
+        extension: "eml",
+        sizeBytes: 80,
+        s3Key: childKey,
+        contentType: "eml",
+        ingestStatus: "ready",
+        parentDocumentId: rootId,
+      });
+      const grandchildId = await insertTestDocument(client, {
+        orgId,
+        matterId,
+        guidNumber: 3,
+        filename: "attachment.pdf",
+        extension: "pdf",
+        sizeBytes: 50,
+        s3Key: grandchildKey,
+        contentType: "pdf",
+        ingestStatus: "ready",
+        parentDocumentId: childId,
+        familyDocumentId: rootId,
+        depth: 2,
+      });
+      return { rootId, grandchildId };
+    });
+
+    const app = buildTestApp({ orgId, userId, role: "admin", email: "tester@example.com" });
+    const response = await request(app).delete(`/api/matters/${matterId}/documents/${rootId}`).send();
+    expect(response.status).toBe(204);
+
+    const grandchildRow = await withOrgSession(orgId, (client) => client.query("SELECT id FROM documents WHERE id = $1", [grandchildId]));
+    expect(grandchildRow.rowCount).toBe(0);
+    await expect(s3Client.send(new GetObjectCommand({ Bucket: DOCUMENTS_BUCKET, Key: grandchildKey }))).rejects.toBeTruthy();
+
+    // One audit row for every descendant, all three levels — proves the
+    // recursive query, not just the direct-children one it replaced.
+    const audit = await withOrgSession(orgId, (client) =>
+      client.query("SELECT description FROM audit_log WHERE matter_id = $1 AND action = 'document.delete' ORDER BY description", [matterId]),
+    );
+    expect(audit.rows.map((r) => r.description)).toEqual(['Deleted file "attachment.pdf"', 'Deleted file "mailbox.pst"', 'Deleted file "nested.eml"']);
   });
 
   it("404s for a document that doesn't exist", async () => {

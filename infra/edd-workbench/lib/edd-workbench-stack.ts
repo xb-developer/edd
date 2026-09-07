@@ -1058,7 +1058,12 @@ export class EddWorkbenchStack extends cdk.Stack {
 
     const migrateTaskDefinition = new ecs.FargateTaskDefinition(this, "MigrateTaskDefinition", {
       cpu: 256,
-      memoryLimitMiB: 512,
+      // 512 wasn't enough — reindexSearch.ts OOM-killed (exit 137) loading
+      // all ~9,400 real documents' metadata in one unpaginated query. Now
+      // paged (500 rows at a time — see reindexSearch.ts's own comment),
+      // but keeping some headroom above bare minimum for tsx/pg's own
+      // baseline footprint, not just "the current page fits."
+      memoryLimitMiB: 1024,
     });
     migrateTaskDefinition.addContainer("migrate", {
       image: serverImage,

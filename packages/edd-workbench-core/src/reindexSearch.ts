@@ -27,33 +27,57 @@ interface DocumentRow {
   guid_number: number;
 }
 
+// Keyset-paginated (id > lastId ORDER BY id LIMIT N), not one unbounded
+// SELECT * FROM documents — `metadata` can hold a whole document's
+// extracted text (email bodies, OCR output), so loading every row across
+// every org in a single query has real memory cost that grows with the
+// corpus, not a fixed one. A real run against ~9,400 documents OOM-killed
+// this script's own Fargate task (512MiB) doing exactly that; this keeps
+// peak memory bounded to one page regardless of total document count.
+const PAGE_SIZE = 500;
+
 async function run(): Promise<void> {
   const client = new Client({ connectionString, ssl: resolveSslConfig() });
   await client.connect();
 
-  const { rows } = await client.query<DocumentRow>(
-    "SELECT id, org_id, matter_id, original_filename, extension, content_type_detected, metadata, guid_number FROM documents",
-  );
-  console.log(`Reindexing ${rows.length} documents...`);
-
   let indexed = 0;
   let failed = 0;
-  for (const row of rows) {
-    try {
-      await indexDocument({
-        documentId: row.id,
-        orgId: row.org_id,
-        matterId: row.matter_id,
-        filename: row.original_filename,
-        extension: row.extension,
-        guid: formatGuid(row.guid_number),
-        body: resolveEmbeddableText(row.content_type_detected, row.metadata) ?? "",
-      });
-      indexed++;
-    } catch (err) {
-      failed++;
-      console.error(`Failed to index document ${row.id}:`, err);
+  let total = 0;
+  let lastId: string | null = null;
+
+  for (;;) {
+    const result = await client.query<DocumentRow>(
+      `SELECT id, org_id, matter_id, original_filename, extension, content_type_detected, metadata, guid_number
+       FROM documents
+       WHERE $2::uuid IS NULL OR id > $2
+       ORDER BY id LIMIT $1`,
+      [PAGE_SIZE, lastId],
+    );
+    const rows: DocumentRow[] = result.rows;
+    if (rows.length === 0) break;
+    total += rows.length;
+    console.log(`Reindexing page of ${rows.length} documents (${total} so far)...`);
+
+    for (const row of rows) {
+      try {
+        await indexDocument({
+          documentId: row.id,
+          orgId: row.org_id,
+          matterId: row.matter_id,
+          filename: row.original_filename,
+          extension: row.extension,
+          guid: formatGuid(row.guid_number),
+          body: resolveEmbeddableText(row.content_type_detected, row.metadata) ?? "",
+        });
+        indexed++;
+      } catch (err) {
+        failed++;
+        console.error(`Failed to index document ${row.id}:`, err);
+      }
     }
+
+    lastId = rows[rows.length - 1].id;
+    if (rows.length < PAGE_SIZE) break;
   }
 
   console.log(`Reindex complete: ${indexed} indexed, ${failed} failed.`);

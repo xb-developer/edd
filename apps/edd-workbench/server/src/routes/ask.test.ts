@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
 import express from "express";
 import request from "supertest";
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { pool, withOrgSession, initMatterGuidCounter, replaceDocumentChunks } from "@xbundle/edd-workbench-core";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { pool, withOrgSession, initMatterGuidCounter, replaceDocumentChunks, s3Client, DOCUMENTS_BUCKET } from "@xbundle/edd-workbench-core";
+import { CreateBucketCommand, HeadBucketCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import type { EddRequestContext } from "../auth.js";
 import { askRouter } from "./ask.js";
+import { documentsRouter } from "./documents.js";
 
 function buildTestApp(eddContext: EddRequestContext) {
   const app = express();
@@ -14,6 +16,25 @@ function buildTestApp(eddContext: EddRequestContext) {
     next();
   });
   app.use("/api/matters/:matterId/ask", askRouter);
+  app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  });
+  return app;
+}
+
+// Mounts the real delete route — needed for the delete+/ask test below,
+// which must prove the actual HTTP delete path (not just a raw SQL DELETE
+// like documentChunks.test.ts's cascade test) leaves nothing for /ask to
+// retrieve.
+function buildDocumentsTestApp(eddContext: EddRequestContext) {
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => {
+    req.eddContext = eddContext;
+    next();
+  });
+  app.use("/api/matters/:matterId/documents", documentsRouter);
   app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     console.error(err);
     res.status(500).json({ error: "Internal server error" });
@@ -113,6 +134,14 @@ function stubGpuFetch(chatContent = "This is a grounded answer.") {
 describe("askRouter", () => {
   let orgIdsToClean: string[] = [];
 
+  beforeAll(async () => {
+    try {
+      await s3Client.send(new HeadBucketCommand({ Bucket: DOCUMENTS_BUCKET }));
+    } catch {
+      await s3Client.send(new CreateBucketCommand({ Bucket: DOCUMENTS_BUCKET }));
+    }
+  });
+
   beforeEach(() => {
     process.env.EMBEDDING_SERVICE_URL = "http://embedding.internal:8000";
     process.env.GENERATION_SERVICE_URL = "http://generation.internal:8000";
@@ -205,6 +234,48 @@ describe("askRouter", () => {
 
     expect(response.status).toBe(200);
     expect(response.body).toEqual({ answer: "No relevant documents found for this question.", relevantDocuments: [] });
+    expect(vi.mocked(fetch).mock.calls.some((call) => String(call[0]).includes("/v1/chat/completions"))).toBe(false);
+  });
+
+  it("stops surfacing a document's content once it's actually deleted, including a cascade-deleted child — regression test for the embeddings-cleanup guarantee resting solely on document_chunks' ON DELETE CASCADE FK", async () => {
+    const orgId = `org_test_${randomUUID()}`;
+    orgIdsToClean.push(orgId);
+    const matterId = await createTestMatter(orgId, "ask-after-delete test matter");
+    const userId = `auth0|${randomUUID()}`;
+
+    const parentKey = `tenants/test/documents/${randomUUID()}/original.eml`;
+    await s3Client.send(new PutObjectCommand({ Bucket: DOCUMENTS_BUCKET, Key: parentKey, Body: Buffer.from("email") }));
+    const parentId = await createDocumentWithChunk(orgId, matterId, 1, "covering-email.eml", oneHot(0));
+    // A cascade-deleted child (parent_document_id -> ON DELETE CASCADE) —
+    // proves the child's own chunks disappear too, via a real HTTP delete
+    // of only the parent, not a direct-child delete.
+    await createDocumentWithChunkAndParent(orgId, matterId, 2, "attachment.pdf", oneHot(1), parentId, parentId);
+    // Overwrite the parent's placeholder s3_key with a real uploaded object
+    // so the delete route's S3 cleanup exercises a real object, matching
+    // documents.test.ts's own delete tests.
+    await withOrgSession(orgId, (client) => client.query("UPDATE documents SET s3_key = $1 WHERE id = $2", [parentKey, parentId]));
+
+    const askApp = buildTestApp({ orgId, userId, role: "reviewer", email: "tester@example.com" });
+    const documentsApp = buildDocumentsTestApp({ orgId, userId, role: "admin", email: "tester@example.com" });
+
+    stubGpuFetch();
+    const before = await request(askApp).post(`/api/matters/${matterId}/ask`).send({ question: "What happened?" });
+    expect(before.status).toBe(200);
+    expect(before.body.relevantDocuments).toEqual([{ documentId: parentId, guid: "000001", filename: "covering-email.eml" }]);
+
+    const deleteResponse = await request(documentsApp).delete(`/api/matters/${matterId}/documents/${parentId}`).send();
+    expect(deleteResponse.status).toBe(204);
+
+    // Both documents' chunks must be gone at the DB level (the cascade FK
+    // this whole guarantee rests on), not just unreachable via the /ask
+    // query — proves the mechanism, not just the symptom.
+    const remainingChunks = await withOrgSession(orgId, (client) => client.query("SELECT document_id FROM document_chunks WHERE matter_id = $1", [matterId]));
+    expect(remainingChunks.rows).toEqual([]);
+
+    stubGpuFetch();
+    const after = await request(askApp).post(`/api/matters/${matterId}/ask`).send({ question: "What happened?" });
+    expect(after.status).toBe(200);
+    expect(after.body).toEqual({ answer: "No relevant documents found for this question.", relevantDocuments: [] });
     expect(vi.mocked(fetch).mock.calls.some((call) => String(call[0]).includes("/v1/chat/completions"))).toBe(false);
   });
 

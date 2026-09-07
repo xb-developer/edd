@@ -1,6 +1,5 @@
 import { Router, type Request } from "express";
 import { withOrgSession } from "@xbundle/edd-workbench-core";
-import { requireRole } from "../auth.js";
 
 // mergeParams — mounted at /api/matters/:matterId/document-tags (see index.ts).
 export const documentTagsRouter = Router({ mergeParams: true });
@@ -50,7 +49,13 @@ documentTagsRouter.get("/:documentId", async (req: Request<{ matterId: string; d
 // existing single-document toggle (client sends [documentId]) and the new
 // bulk-apply case (client sends every checked id). No separate single-doc
 // method exists.
-documentTagsRouter.post("/apply", requireRole("admin", "reviewer"), async (req: Request<{ matterId: string }>, res, next) => {
+//
+// No role gate — every role (including litigation_support) may apply/
+// remove a coding tag on a document. Distinct from tags.ts's own
+// POST /custom (creating a new tag/tag-set definition), which stays
+// admin/reviewer-only — that's a different, narrower concern than
+// applying an already-existing tag.
+documentTagsRouter.post("/apply", async (req: Request<{ matterId: string }>, res, next) => {
   try {
     const { orgId, userId } = req.eddContext!;
     const { matterId } = req.params;
@@ -87,7 +92,7 @@ documentTagsRouter.post("/apply", requireRole("admin", "reviewer"), async (req: 
   }
 });
 
-documentTagsRouter.post("/remove", requireRole("admin", "reviewer"), async (req: Request<{ matterId: string }>, res, next) => {
+documentTagsRouter.post("/remove", async (req: Request<{ matterId: string }>, res, next) => {
   try {
     const { orgId } = req.eddContext!;
     const { matterId } = req.params;

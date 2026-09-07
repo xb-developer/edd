@@ -213,17 +213,26 @@ describe("documentTags router", () => {
     }
   });
 
-  it("apply/remove as litigation_support is forbidden", async () => {
+  it("allows a litigation_support caller to apply and remove a tag — every role may tag documents", async () => {
     const { orgId, matterId, userId } = await createTestOrgAndMatter("dt-role-gate");
     try {
-      const tagId = await createTestTag(orgId, matterId, "Gated");
+      const tagId = await createTestTag(orgId, matterId, "Ungated");
       const docId = await createTestDocument(orgId, matterId);
       const app = buildTestApp({ orgId, userId, role: "litigation_support", email: "tester@example.com" });
 
       const apply = await request(app).post(`/api/matters/${matterId}/document-tags/apply`).send({ documentIds: [docId], tagId });
-      expect(apply.status).toBe(403);
+      expect(apply.status).toBe(200);
+      const applied = await withOrgSession(orgId, (client) =>
+        client.query("SELECT 1 FROM document_tags WHERE document_id = $1 AND tag_id = $2", [docId, tagId]),
+      );
+      expect(applied.rowCount).toBe(1);
+
       const remove = await request(app).post(`/api/matters/${matterId}/document-tags/remove`).send({ documentIds: [docId], tagId });
-      expect(remove.status).toBe(403);
+      expect(remove.status).toBe(200);
+      const removed = await withOrgSession(orgId, (client) =>
+        client.query("SELECT 1 FROM document_tags WHERE document_id = $1 AND tag_id = $2", [docId, tagId]),
+      );
+      expect(removed.rowCount).toBe(0);
     } finally {
       await deleteTestOrg(orgId);
     }

@@ -465,11 +465,6 @@ h2.panel-title {
   opacity: 0.5;
   cursor: not-allowed;
 }
-.drop-hint {
-  font-size: 11px;
-  color: var(--ink-soft);
-  margin-left: auto;
-}
 .import-progress-banner {
   display: flex;
   align-items: center;
@@ -545,12 +540,23 @@ h2.panel-title {
   overflow: auto;
   position: relative;
 }
-/* Not in the POC — its drop target has no visual feedback beyond the
-   static .drop-hint label. Cheap to add and genuinely useful: dragging
-   files over a target with zero visual response reads as "did that even
-   register?" */
-.table-wrap.drag-over {
-  background: var(--navy-soft);
+/* Whole-window drop target (see MatterDetail.tsx's window-level drag
+   listeners), not just the document table — fixed/full-viewport so
+   dragging a file anywhere gives the same "did that even register?"
+   feedback the old table-only highlight gave, regardless of which part
+   of the layout the pointer is actually over. */
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(23, 42, 71, 0.85);
+  color: #fff;
+  font-size: 20px;
+  font-weight: 600;
+  pointer-events: none;
 }
 table.reg {
   /* auto + min-width:100% (not a flat 100%) — with table-layout:fixed and

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { DragEvent as ReactDragEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import type { ApiClient } from "./api";
 import type { DocumentDTO, TagSetDTO, AskResultDTO } from "./types";
 import { DocumentViewer } from "./DocumentViewer";
@@ -447,18 +447,54 @@ export function MatterDetail({ api, matterId, canManageAccess }: MatterDetailPro
     if (fileList && fileList.length > 0) documentImport.importFiles(Array.from(fileList));
   }
 
-  function handleDragOver(e: ReactDragEvent<HTMLDivElement>) {
-    e.preventDefault();
-    setDragOver(true);
-  }
-  function handleDragLeave() {
-    setDragOver(false);
-  }
-  function handleDrop(e: ReactDragEvent<HTMLDivElement>) {
-    e.preventDefault();
-    setDragOver(false);
-    handleFilesPicked(e.dataTransfer.files);
-  }
+  // Whole-window drop target, not just the document table — native
+  // listeners on window, not React's synthetic onDragOver/onDrop on one
+  // div, since "anywhere in the window" includes the side panels/toolbar
+  // too. dragover must call preventDefault() or the browser's own default
+  // (navigate to the dropped file) wins instead of firing a drop event at
+  // all. dragCounter (not a plain boolean) is the standard fix for
+  // dragenter/dragleave firing once per child element as the pointer
+  // crosses them while dragging across a large, deeply-nested region —
+  // without it, the overlay would flicker on/off while dragging over the
+  // table's own rows.
+  useEffect(() => {
+    let dragCounter = 0;
+    function isFileDrag(e: DragEvent): boolean {
+      return !!e.dataTransfer?.types.includes("Files");
+    }
+    function onWindowDragEnter(e: DragEvent) {
+      if (!isFileDrag(e)) return;
+      e.preventDefault();
+      dragCounter++;
+      setDragOver(true);
+    }
+    function onWindowDragOver(e: DragEvent) {
+      if (!isFileDrag(e)) return;
+      e.preventDefault();
+    }
+    function onWindowDragLeave(e: DragEvent) {
+      if (!isFileDrag(e)) return;
+      dragCounter = Math.max(0, dragCounter - 1);
+      if (dragCounter === 0) setDragOver(false);
+    }
+    function onWindowDrop(e: DragEvent) {
+      if (!isFileDrag(e)) return;
+      e.preventDefault();
+      dragCounter = 0;
+      setDragOver(false);
+      handleFilesPicked(e.dataTransfer?.files ?? null);
+    }
+    window.addEventListener("dragenter", onWindowDragEnter);
+    window.addEventListener("dragover", onWindowDragOver);
+    window.addEventListener("dragleave", onWindowDragLeave);
+    window.addEventListener("drop", onWindowDrop);
+    return () => {
+      window.removeEventListener("dragenter", onWindowDragEnter);
+      window.removeEventListener("dragover", onWindowDragOver);
+      window.removeEventListener("dragleave", onWindowDragLeave);
+      window.removeEventListener("drop", onWindowDrop);
+    };
+  }, [documentImport.importFiles]);
 
   return (
     // width:100%/minWidth:0 — this div is the sole child of the OUTER
@@ -473,6 +509,11 @@ export function MatterDetail({ api, matterId, canManageAccess }: MatterDetailPro
     // what makes every downstream overflow/containment rule (col-center's
     // own overflow:hidden, .table-wrap's overflow:auto) behave as intended.
     <div style={{ display: "flex", flexDirection: "column", height: "100%", width: "100%", minWidth: 0, minHeight: 0 }}>
+      {dragOver && (
+        <div className="drop-overlay">
+          <span>Drop files to import</span>
+        </div>
+      )}
       {error && (
         <div className="import-failures-banner">
           <div className="import-failures-head">
@@ -615,15 +656,8 @@ export function MatterDetail({ api, matterId, canManageAccess }: MatterDetailPro
                   e.target.value = "";
                 }}
               />
-              <span className="drop-hint">Drag files here to import</span>
             </div>
-            <div
-              className={`table-wrap${dragOver ? " drag-over" : ""}`}
-              ref={columnWidths.containerRef}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-            >
+            <div className="table-wrap" ref={columnWidths.containerRef}>
               {filteredDocuments.length === 0 ? (
                 <div className="empty-state">
                   <div className="glyph">000000</div>

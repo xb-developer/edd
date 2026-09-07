@@ -190,6 +190,16 @@ export function EddWorkbenchWorkspace({ apiBaseUrl = "http://localhost:4430/api"
   if (!matters || !selectedMatter) {
     return (
       <div className="app">
+        <header className="topbar">
+          <div className="brand">
+            <span className="mark">Co</span>
+          </div>
+          {onLogout && (
+            <button type="button" className="topbar-btn" onClick={handleLogout}>
+              Log out
+            </button>
+          )}
+        </header>
         <p className="empty-note">Loading…</p>
         {error && <p className="bulk-note">{error}</p>}
       </div>

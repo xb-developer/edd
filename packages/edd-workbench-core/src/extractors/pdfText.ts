@@ -36,3 +36,57 @@ export async function extractPdfTextLayer(buffer: Buffer): Promise<string> {
     doc.cleanup();
   }
 }
+
+export interface PdfMetadata {
+  title: string | null;
+  author: string | null;
+  subject: string | null;
+  /** The PDF's own ModDate (falling back to CreationDate if unset) — the document's own last-modified property, matching OfficeMetadata's `modified` field, NOT the uploaded file's browser-reported mtime. */
+  modified: Date | null;
+}
+
+const NULL_PDF_METADATA: PdfMetadata = { title: null, author: null, subject: null, modified: null };
+
+/**
+ * PDF date values are the spec's own `D:YYYYMMDDHHmmSSOHH'mm'` format, not
+ * ISO 8601 — everything after the 4-digit year is optional, and real-world
+ * PDFs commonly omit the timezone offset entirely. Returns null (not an
+ * Invalid Date) for anything that doesn't at least match a 4-digit year.
+ */
+function parsePdfDate(value: string | undefined): Date | null {
+  if (!value) return null;
+  const match = /^D:(\d{4})(\d{2})?(\d{2})?(\d{2})?(\d{2})?(\d{2})?/.exec(value);
+  if (!match) return null;
+  const [, year, month = "01", day = "01", hour = "00", minute = "00", second = "00"] = match;
+  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second)));
+  return isNaN(date.getTime()) ? null : date;
+}
+
+/**
+ * Pulls title/author/subject/modified out of a PDF's own Info dictionary
+ * (/Title, /Author, /Subject, /ModDate|/CreationDate) — the PDF equivalent
+ * of docProps/core.xml for Office Open XML files (see office.ts). Returns
+ * nulls rather than throwing for anything unreadable, same defensive
+ * contract as extractOfficeMetadata: a single corrupt/unusual PDF's
+ * metadata must never take down the rest of an ingest batch. Independent
+ * of extractPdfTextLayer — a scanned PDF with no real text layer (headed
+ * to OCR) can still have real Info-dictionary metadata worth keeping.
+ */
+export async function extractPdfMetadata(buffer: Buffer): Promise<PdfMetadata> {
+  let doc;
+  try {
+    doc = await getDocument({ data: new Uint8Array(buffer), verbosity: 0 }).promise;
+    const { info } = await doc.getMetadata();
+    const dict = info as Record<string, unknown>;
+    return {
+      title: typeof dict.Title === "string" && dict.Title.trim() ? dict.Title : null,
+      author: typeof dict.Author === "string" && dict.Author.trim() ? dict.Author : null,
+      subject: typeof dict.Subject === "string" && dict.Subject.trim() ? dict.Subject : null,
+      modified: parsePdfDate(typeof dict.ModDate === "string" ? dict.ModDate : undefined) ?? parsePdfDate(typeof dict.CreationDate === "string" ? dict.CreationDate : undefined),
+    };
+  } catch {
+    return NULL_PDF_METADATA;
+  } finally {
+    doc?.cleanup();
+  }
+}

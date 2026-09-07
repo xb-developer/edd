@@ -302,6 +302,78 @@ startxref
 0
 %%EOF`);
 
+// Same page/text-layer shape as PDF_WITH_TEXT_LAYER, plus a real Info
+// dictionary (object 6, referenced from the trailer) — used to prove
+// title/author/subject/content_modified_at get extracted for a PDF that
+// arrives as an email ATTACHMENT, not just a top-level upload (see
+// extractPdfMetadata's own unit tests in pdfText.test.ts for the extractor
+// itself).
+const PDF_WITH_METADATA_AND_TEXT_LAYER = Buffer.from(`%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+5 0 obj
+<< /Length 58 >>
+stream
+BT /F1 18 Tf 10 50 Td (Real embedded text) Tj ET
+endstream
+endobj
+6 0 obj
+<< /Title (Witness Statement Draft) /Author (Jane Reviewer) /Subject (Draft for review) /ModDate (D:20260115120000+00'00') >>
+endobj
+xref
+0 7
+0000000000 65535 f
+trailer
+<< /Size 7 /Root 1 0 R /Info 6 0 R >>
+startxref
+0
+%%EOF`);
+
+/**
+ * Genuine multipart/mixed eml whose one attachment is real, arbitrary binary
+ * content (base64-encoded) at whatever MIME type the caller specifies — same
+ * hand-written-real-MIME precedent as buildEmlWithRfc822Attachment above,
+ * generalized so both the pdf- and docx-attachment metadata-extraction tests
+ * can share it.
+ */
+function buildEmlWithBinaryAttachment(bodyText: string, attachmentFilename: string, mimeType: string, attachmentBuffer: Buffer): Buffer {
+  return Buffer.from(
+    [
+      'From: "Jane Reviewer" <jane@example.com>',
+      'To: "John Admin" <john@example.com>',
+      "Subject: Please see attached",
+      "Date: Mon, 12 Jan 2026 09:30:00 +0000",
+      "MIME-Version: 1.0",
+      'Content-Type: multipart/mixed; boundary="OUTER-BOUNDARY"',
+      "",
+      "--OUTER-BOUNDARY",
+      'Content-Type: text/plain; charset="utf-8"',
+      "",
+      bodyText,
+      "",
+      "--OUTER-BOUNDARY",
+      `Content-Type: ${mimeType}`,
+      `Content-Disposition: attachment; filename="${attachmentFilename}"`,
+      "Content-Transfer-Encoding: base64",
+      "",
+      attachmentBuffer.toString("base64"),
+      "--OUTER-BOUNDARY--",
+      "",
+    ].join("\r\n"),
+    "utf-8",
+  );
+}
+
 /** Creates an org/matter/document row, optionally uploading a real body to S3 at its s3_key first (skipped when body is null, to exercise the "object doesn't exist" failure path). `sizeBytesOverride` lets a test set a size_bytes value independent of the real body's own length (e.g. to exercise the pst pre-flight size-ceiling check without uploading/downloading an actual oversized file). */
 async function setupDocument(params: {
   filename: string;
@@ -1002,6 +1074,87 @@ describe("handleIngestMessage", () => {
     // all — ocr_status stays at its default, distinct from the OCR
     // hand-off tests below even though both reach ingest_status='ready'.
     expect(doc.ocr_status).toBe("excluded");
+  });
+
+  it("extracts title/author/subject/content_modified_at from a top-level pdf upload's own Info dictionary", async () => {
+    const { orgId, documentId } = await setupDocument({
+      filename: "bundle.pdf",
+      contentTypeDetected: "pdf",
+      body: PDF_WITH_METADATA_AND_TEXT_LAYER,
+    });
+    currentOrgId = orgId;
+    await handleIngestMessage(JSON.stringify({ documentId, orgId }));
+    const doc = await getDocument(orgId, documentId);
+
+    expect(doc.ingest_status).toBe("ready");
+    expect(doc.title).toBe("Witness Statement Draft");
+    expect(doc.author).toBe("Jane Reviewer");
+    expect(doc.subject).toBe("Draft for review");
+    expect(new Date(doc.content_modified_at).toISOString()).toBe("2026-01-15T12:00:00.000Z");
+  });
+
+  it("extracts title/author/subject/content_modified_at for a pdf that arrives as an email attachment, not just a top-level upload — regression test for the reported attachment-metadata gap", async () => {
+    const eml = buildEmlWithBinaryAttachment(
+      "Please see the attached witness statement.",
+      "witness-statement.pdf",
+      "application/pdf",
+      PDF_WITH_METADATA_AND_TEXT_LAYER,
+    );
+    const { orgId, documentId } = await setupDocument({ filename: "covering-email.eml", contentTypeDetected: "eml", body: eml });
+    currentOrgId = orgId;
+
+    await handleIngestMessage(JSON.stringify({ documentId, orgId }));
+    const children = await withOrgSession(orgId, (client) =>
+      client.query<{ id: string }>(
+        "SELECT id FROM documents WHERE parent_document_id = $1 AND original_filename = $2",
+        [documentId, "witness-statement.pdf"],
+      ),
+    );
+    expect(children.rows).toHaveLength(1);
+    const attachmentId = children.rows[0].id;
+
+    // Attachments are inserted 'pending' and re-enqueued — fully processed
+    // only once re-entering this same handler, same pattern as every other
+    // attachment-recursion test in this file.
+    await handleIngestMessage(JSON.stringify({ documentId: attachmentId, orgId }));
+    const attachment = await getDocument(orgId, attachmentId);
+
+    expect(attachment.ingest_status).toBe("ready");
+    expect(attachment.title).toBe("Witness Statement Draft");
+    expect(attachment.author).toBe("Jane Reviewer");
+    expect(attachment.subject).toBe("Draft for review");
+    expect(new Date(attachment.content_modified_at).toISOString()).toBe("2026-01-15T12:00:00.000Z");
+    expect(attachment.metadata).toEqual({ text: "Real embedded text" });
+  });
+
+  it("extracts docProps title/author/subject for a docx that arrives as an email attachment, not just a top-level upload — regression test for the reported attachment-metadata gap", async () => {
+    const eml = buildEmlWithBinaryAttachment(
+      "Please see the attached witness statement.",
+      "witness-statement.docx",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      await buildFixtureDocx(),
+    );
+    const { orgId, documentId } = await setupDocument({ filename: "covering-email.eml", contentTypeDetected: "eml", body: eml });
+    currentOrgId = orgId;
+
+    await handleIngestMessage(JSON.stringify({ documentId, orgId }));
+    const children = await withOrgSession(orgId, (client) =>
+      client.query<{ id: string }>(
+        "SELECT id FROM documents WHERE parent_document_id = $1 AND original_filename = $2",
+        [documentId, "witness-statement.docx"],
+      ),
+    );
+    expect(children.rows).toHaveLength(1);
+    const attachmentId = children.rows[0].id;
+
+    await handleIngestMessage(JSON.stringify({ documentId: attachmentId, orgId }));
+    const attachment = await getDocument(orgId, attachmentId);
+
+    expect(attachment.ingest_status).toBe("ready");
+    expect(attachment.title).toBe("Witness Statement Draft");
+    expect(attachment.author).toBe("Jane Reviewer");
+    expect(attachment.subject).toBe("Draft for review");
+    expect(new Date(attachment.content_modified_at).toISOString()).toBe(new Date("2026-01-15T10:30:00Z").toISOString());
   });
 
   it("hands a text-layer-less pdf (a stand-in for a scanned page) off to the ocr queue instead of marking it ready", async () => {

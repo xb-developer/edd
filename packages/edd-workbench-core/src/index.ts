@@ -14,7 +14,7 @@ export { extractDocxContent, type DocxContent } from "./extractors/docx.js";
 export { extractXlsxContent, type XlsxContent, type XlsxSheet } from "./extractors/xlsx.js";
 export { extractDocContent, type DocExtractionResult, type DetectedDocFormat } from "./extractors/doc.js";
 export { extractOfficeText, type OfficeTextContent, type OfficeTextFileType } from "./extractors/officeText.js";
-export { extractPdfTextLayer } from "./extractors/pdfText.js";
+export { extractPdfTextLayer, extractPdfMetadata, type PdfMetadata } from "./extractors/pdfText.js";
 export { resolveEmbeddableText } from "./embeddableText.js";
 export { detectInjectionPatterns, type InjectionCheckResult } from "./injectionDetection.js";
 export { chunkText } from "./chunking.js";

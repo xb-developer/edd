@@ -14,6 +14,7 @@ import {
   extractOfficeText,
   type OfficeTextFileType,
   extractPdfTextLayer,
+  extractPdfMetadata,
   DOCUMENTS_BUCKET,
 } from "@xbundle/edd-workbench-core";
 import { expandRealNodeAttachments, handlePstIngest, handleZipIngest, handleSevenZipIngest, handleMboxIngest } from "./containerExpansion.js";
@@ -265,6 +266,22 @@ export async function handleIngestMessage(body: string): Promise<void> {
         );
         await expandRealNodeAttachments({ orgId, matterId, parent: { id: documentId, familyDocumentId, depth }, attachments: msg.attachments });
       } else if (contentType === "pdf" || contentType === "image" || contentType === "tiff") {
+        // Title/author/subject/modified live in the PDF's own Info
+        // dictionary independently of whether it has a real text layer —
+        // a scanned pdf (headed to OCR below either way) can still have
+        // real /Author metadata worth keeping, so this runs unconditionally
+        // before the text-layer/OCR branching decides ingest_status.
+        // image/tiff aren't real PDFs at all, so there's nothing to read.
+        if (contentType === "pdf") {
+          const pdfMetadata = await extractPdfMetadata(buffer);
+          await client.query("UPDATE documents SET title = $1, author = $2, subject = $3, content_modified_at = $4 WHERE id = $5", [
+            pdfMetadata.title,
+            pdfMetadata.author,
+            pdfMetadata.subject,
+            pdfMetadata.modified,
+            documentId,
+          ]);
+        }
         // Real embedded text layer first (pdf only — cheap, no hand-off
         // needed, same fast path as every other extractor above). Only a
         // pdf can have one at all; image/tiff always fall straight to OCR.

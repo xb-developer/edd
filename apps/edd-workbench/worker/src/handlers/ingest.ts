@@ -218,9 +218,9 @@ export async function handleIngestMessage(body: string): Promise<void> {
         const metadata = doc.html ? { html: doc.html } : doc.text ? { text: doc.text } : null;
         await client.query(
           `UPDATE documents
-           SET content_type_detected = $1, metadata = $2, ingest_status = 'ready'
-           WHERE id = $3`,
-          [doc.detectedFormat, metadata ? JSON.stringify(metadata) : null, documentId],
+           SET content_type_detected = $1, title = $2, author = $3, subject = $4, content_modified_at = $5, metadata = $6, ingest_status = 'ready'
+           WHERE id = $7`,
+          [doc.detectedFormat, doc.title, doc.author, doc.subject, doc.modified, metadata ? JSON.stringify(metadata) : null, documentId],
         );
       } else if (OFFICE_TEXT_CONTENT_TYPES.has(contentType)) {
         // odt/ods/odp/epub/html(/htm) and genuine .rtf all go through the

@@ -156,6 +156,16 @@ function buildFixtureLegacyXls(): Buffer {
 
 async function buildFixtureDocxDisguisedAsDoc(): Promise<Buffer> {
   const zip = new JSZip();
+  zip.file(
+    "docProps/core.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <dc:title>Witness Statement Draft</dc:title>
+  <dc:subject>Draft for review</dc:subject>
+  <dc:creator>Jane Reviewer</dc:creator>
+  <dcterms:modified xsi:type="dcterms:W3CDTF">2026-01-15T10:30:00Z</dcterms:modified>
+</cp:coreProperties>`,
+  );
   zip.file("[Content_Types].xml", CONTENT_TYPES_XML);
   zip.file("_rels/.rels", RELS_XML);
   zip.file(
@@ -583,9 +593,15 @@ describe("handleIngestMessage", () => {
     expect(doc.ingest_status).toBe("ready");
     expect(doc.content_type_detected).toBe("doc");
     expect(doc.metadata.text).toContain("This is a test of reviewing");
+    // Real values from this fixture's own SummaryInformation OLE stream —
+    // regression test for the reported gap: legacy binary .doc had ZERO
+    // metadata extraction (title/author/subject/content_modified_at all
+    // stayed null for every .doc, top-level or attachment) until now.
+    expect(doc.author).toBe("Stuart Watt");
+    expect(new Date(doc.content_modified_at).toISOString()).toBe("2021-05-16T15:37:00.000Z");
   });
 
-  it("detects a real .docx mislabeled as .doc via magic bytes and corrects content_type_detected to 'docx'", async () => {
+  it("detects a real .docx mislabeled as .doc via magic bytes and corrects content_type_detected to 'docx', including its docProps title/author/subject/modified", async () => {
     const { orgId, documentId } = await setupDocument({
       filename: "renamed-witness-statement.doc",
       contentTypeDetected: "doc",
@@ -598,6 +614,10 @@ describe("handleIngestMessage", () => {
     expect(doc.ingest_status).toBe("ready");
     expect(doc.content_type_detected).toBe("docx");
     expect(doc.metadata.html).toContain("Please review the attached draft.");
+    expect(doc.title).toBe("Witness Statement Draft");
+    expect(doc.author).toBe("Jane Reviewer");
+    expect(doc.subject).toBe("Draft for review");
+    expect(new Date(doc.content_modified_at).toISOString()).toBe(new Date("2026-01-15T10:30:00Z").toISOString());
   });
 
   it("extracts real RTF content via officeText and marks the document ready", async () => {
@@ -1156,6 +1176,30 @@ describe("handleIngestMessage", () => {
     expect(attachment.author).toBe("Jane Reviewer");
     expect(attachment.subject).toBe("Draft for review");
     expect(new Date(attachment.content_modified_at).toISOString()).toBe(new Date("2026-01-15T10:30:00Z").toISOString());
+  });
+
+  it("extracts author/content_modified_at (from the SummaryInformation OLE stream) for a genuine legacy .doc that arrives as an email attachment — this is the exact real-world case (a pre-2007 Word .doc attached to an eml) that was found completely unextracted in a real staging matter", async () => {
+    const eml = buildEmlWithBinaryAttachment("Please see the attached submission.", "Enron in Action Submission Form.doc", "application/msword", FIXTURE_LEGACY_DOC);
+    const { orgId, documentId } = await setupDocument({ filename: "covering-email.eml", contentTypeDetected: "eml", body: eml });
+    currentOrgId = orgId;
+
+    await handleIngestMessage(JSON.stringify({ documentId, orgId }));
+    const children = await withOrgSession(orgId, (client) =>
+      client.query<{ id: string }>(
+        "SELECT id FROM documents WHERE parent_document_id = $1 AND original_filename = $2",
+        [documentId, "Enron in Action Submission Form.doc"],
+      ),
+    );
+    expect(children.rows).toHaveLength(1);
+    const attachmentId = children.rows[0].id;
+
+    await handleIngestMessage(JSON.stringify({ documentId: attachmentId, orgId }));
+    const attachment = await getDocument(orgId, attachmentId);
+
+    expect(attachment.ingest_status).toBe("ready");
+    expect(attachment.content_type_detected).toBe("doc");
+    expect(attachment.author).toBe("Stuart Watt");
+    expect(new Date(attachment.content_modified_at).toISOString()).toBe("2021-05-16T15:37:00.000Z");
   });
 
   it("hands a text-layer-less pdf (a stand-in for a scanned page) off to the ocr queue instead of marking it ready", async () => {

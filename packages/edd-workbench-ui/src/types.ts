@@ -66,11 +66,11 @@ export interface DocumentDTO {
   /** Its own axis from ingestStatus (see migration 029) — "excluded" for every document whose content type never goes through OCR at all (docx, eml, a pdf with a real text layer, ...); "processing"/"ready"/"failed" only for documents that were actually handed off to the OCR service. Powers the "OCR" Processing Filter option, which selects "ready" specifically. */
   ocrStatus: "excluded" | "processing" | "ready" | "failed";
   title: string | null;
-  /** For an email, the sender's display name (or their address if no name was given) — NOT the combined "Name <address>" form. For docx/xlsx/pptx/odt/ods/odp/epub/rtf/html, the document's own Author metadata property. Null for formats with no author concept (pdf, image/tiff, plain text). */
+  /** For an email, the sender's display name (or their address if no name was given) — NOT the combined "Name <address>" form. For docx/xlsx/pptx/odt/ods/odp/epub/rtf/html, the document's own Author metadata property; for pdf, its /Author Info-dictionary entry. Null for formats with no author concept (image/tiff, plain text) or where extraction found none. */
   author: string | null;
   subject: string | null;
   docDate: string | null;
-  /** The source document's OWN internal last-modified metadata property (docProps/core.xml's dcterms:modified for docx/pptx/xlsx, officeparser's own reading for odt/ods/odp/epub/rtf/html) — NOT fileModifiedAt, which is the uploaded file's browser-reported mtime. Null wherever the property isn't available for a format (email, legacy .doc, pdf, image/tiff, text/other). */
+  /** The source document's OWN internal last-modified metadata property (docProps/core.xml's dcterms:modified for docx/pptx/xlsx, officeparser's own reading for odt/ods/odp/epub/rtf/html, a pdf's own /ModDate|/CreationDate) — NOT fileModifiedAt, which is the uploaded file's browser-reported mtime and is never set at all for an attachment. Null wherever the property isn't available for a format (email — see docDate instead — legacy .doc, image/tiff, text/other) or extraction found none. */
   contentModifiedAt: string | null;
   /** Comma-joined recipient addresses (eml/msg only) — null for every other content type. */
   toAddresses: string | null;

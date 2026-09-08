@@ -36,7 +36,16 @@ export function DocumentPropertiesPanel({ document }: DocumentPropertiesPanelPro
         <dt>Date</dt>
         <dd>{formatDate(document.docDate)}</dd>
         <dt>Modified</dt>
-        <dd>{formatDate(document.fileModifiedAt)}</dd>
+        {/* The document's OWN internal last-modified property (PDF's
+            /ModDate, docx/pptx/xlsx's dcterms:modified, etc.) — preferred
+            over fileModifiedAt (the uploaded file's browser-reported
+            File.lastModified), which is never set at all for an
+            attachment (there's no browser file input involved when a PDF
+            arrives as an email attachment) and is a less meaningful
+            "modified" answer even for a top-level upload. Falls back to
+            fileModifiedAt only when the format has no internal property
+            to read (plain text/other) or extraction found none. */}
+        <dd>{formatDate(document.contentModifiedAt ?? document.fileModifiedAt)}</dd>
         {document.author && (
           <>
             <dt>Author</dt>

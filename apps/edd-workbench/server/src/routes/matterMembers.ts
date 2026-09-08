@@ -6,11 +6,15 @@ import { listOrganizationMembers, getUserProfile } from "../auth0Management.js";
 // from the parent mount path, matching documents.ts/tags.ts's own convention.
 export const matterMembersRouter = Router({ mergeParams: true });
 
+async function getMatterCreatedBy(orgId: string, matterId: string): Promise<string | null> {
+  const matter = await withOrgSession(orgId, (client) => client.query<{ created_by: string | null }>("SELECT created_by FROM matters WHERE id = $1", [matterId]));
+  return matter.rows[0]?.created_by ?? null;
+}
+
 /** Admin, or whoever created this matter — the one gate narrower than plain requireMatterAccess, which only checks "has access at all." */
 async function canManageMembers(orgId: string, matterId: string, userId: string, role: string): Promise<boolean> {
   if (role === "admin") return true;
-  const matter = await withOrgSession(orgId, (client) => client.query<{ created_by: string | null }>("SELECT created_by FROM matters WHERE id = $1", [matterId]));
-  return matter.rows[0]?.created_by === userId;
+  return (await getMatterCreatedBy(orgId, matterId)) === userId;
 }
 
 // No local users table to join for email/name — resolved from Auth0
@@ -107,6 +111,17 @@ matterMembersRouter.delete("/:userId", async (req: Request<{ matterId: string; u
 
     if (!(await canManageMembers(orgId, matterId, userId, role))) {
       res.status(403).json({ error: "Only an admin or this matter's creator can manage its access list" });
+      return;
+    }
+
+    // canManageMembers is the only thing granting a non-admin creator access
+    // to this matter at all — letting them delete their own membership row
+    // would lock them out with no way back in. Scoped to the creator
+    // specifically (not "no one can remove themselves"): an admin removing
+    // their own membership is fine, since their access comes from role, not
+    // this row.
+    if (targetUserId === userId && (await getMatterCreatedBy(orgId, matterId)) === userId) {
+      res.status(400).json({ error: "The matter's creator cannot remove themselves from its access list" });
       return;
     }
 

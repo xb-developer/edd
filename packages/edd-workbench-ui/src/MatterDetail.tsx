@@ -19,6 +19,9 @@ export interface MatterDetailProps {
   matterId: string;
   /** Admin, or this matter's own creator — gates the access-list panel's add/remove controls (see FilterPanel.tsx). */
   canManageAccess: boolean;
+  /** Passed straight through to FilterPanel — see its own props doc. */
+  currentUserId: string;
+  matterCreatedBy: string | null;
 }
 
 const INGEST_STATUS_COLORS: Record<DocumentDTO["ingestStatus"], string> = {
@@ -229,7 +232,7 @@ function SortableTh({ column, sortColumn, sortDirection, onSort, resizeHandle, c
   );
 }
 
-export function MatterDetail({ api, matterId, canManageAccess }: MatterDetailProps) {
+export function MatterDetail({ api, matterId, canManageAccess, currentUserId, matterCreatedBy }: MatterDetailProps) {
   const [documents, setDocuments] = useState<DocumentDTO[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
@@ -594,6 +597,8 @@ export function MatterDetail({ api, matterId, canManageAccess }: MatterDetailPro
             api={api}
             matterId={matterId}
             canManageAccess={canManageAccess}
+            currentUserId={currentUserId}
+            matterCreatedBy={matterCreatedBy}
             style={{ flexBasis: leftResize.size }}
             tagSets={tagSets}
             appliedTagsByDocument={appliedTagsByDocument}

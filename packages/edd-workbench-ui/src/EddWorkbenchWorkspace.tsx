@@ -294,7 +294,13 @@ export function EddWorkbenchWorkspace({ apiBaseUrl = "http://localhost:4430/api"
       </header>
       {error && <p className="bulk-note">{error}</p>}
       <main className="layout">
-        <MatterDetail api={api} matterId={selectedMatter.id} canManageAccess={canManageAccess} />
+        <MatterDetail
+          api={api}
+          matterId={selectedMatter.id}
+          canManageAccess={canManageAccess}
+          currentUserId={me?.userId ?? ""}
+          matterCreatedBy={selectedMatter.createdBy}
+        />
       </main>
     </div>
   );

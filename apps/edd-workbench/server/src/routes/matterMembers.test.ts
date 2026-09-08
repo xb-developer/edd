@@ -195,4 +195,47 @@ describe("matterMembersRouter", () => {
     );
     expect(audit.rows).toEqual([{ action: "matter.access.remove", description: "Removed target@example.com from this matter's access list" }]);
   });
+
+  it("400s the matter's creator trying to remove their own membership — that row is the only thing granting them access if they're not also an admin", async () => {
+    const creatorAuth0Id = `auth0|${randomUUID()}`;
+    const { orgId, matterId, creatorUserId } = await createTestOrgAndMatter("creator-self-remove", creatorAuth0Id);
+    orgIdsToClean.push(orgId);
+    await withOrgSession(orgId, (client) =>
+      client.query("INSERT INTO matter_members (matter_id, user_id, org_id) VALUES ($1, $2, $3)", [matterId, creatorUserId, orgId]),
+    );
+
+    const app = buildTestApp({ orgId, userId: creatorUserId, role: "litigation_support", email: "creator@example.com" });
+    const response = await request(app).delete(`/api/matters/${matterId}/members/${creatorUserId}`).send();
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toMatch(/creator cannot remove themselves/i);
+    const remaining = await withOrgSession(orgId, (client) =>
+      client.query("SELECT 1 FROM matter_members WHERE matter_id = $1 AND user_id = $2", [matterId, creatorUserId]),
+    );
+    expect(remaining.rowCount).toBe(1);
+  });
+
+  it("still lets the creator remove someone else, and lets an admin remove their own membership", async () => {
+    const creatorAuth0Id = `auth0|${randomUUID()}`;
+    const { orgId, matterId, creatorUserId } = await createTestOrgAndMatter("creator-remove-other", creatorAuth0Id);
+    orgIdsToClean.push(orgId);
+
+    const otherUserId = `auth0|${randomUUID()}`;
+    await withOrgSession(orgId, (client) =>
+      client.query("INSERT INTO matter_members (matter_id, user_id, org_id) VALUES ($1, $2, $3)", [matterId, otherUserId, orgId]),
+    );
+    vi.mocked(getUserProfile).mockResolvedValue({ email: "other@example.com", name: null });
+    const creatorApp = buildTestApp({ orgId, userId: creatorUserId, role: "litigation_support", email: "creator@example.com" });
+    expect((await request(creatorApp).delete(`/api/matters/${matterId}/members/${otherUserId}`).send()).status).toBe(204);
+
+    // An admin's own access doesn't depend on this row (canManageMembers
+    // grants them access via role, not matter_members membership), so
+    // there's nothing for this guard to protect them from.
+    const adminUserId = `auth0|${randomUUID()}`;
+    await withOrgSession(orgId, (client) =>
+      client.query("INSERT INTO matter_members (matter_id, user_id, org_id) VALUES ($1, $2, $3)", [matterId, adminUserId, orgId]),
+    );
+    const adminApp = buildTestApp({ orgId, userId: adminUserId, role: "admin", email: "admin@example.com" });
+    expect((await request(adminApp).delete(`/api/matters/${matterId}/members/${adminUserId}`).send()).status).toBe(204);
+  });
 });

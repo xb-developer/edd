@@ -25,6 +25,10 @@ export interface FilterPanelProps {
   matterId: string;
   /** Admin, or this matter's own creator — only they may add/remove entries; anyone with access can still view the list. */
   canManageAccess: boolean;
+  /** The caller's own Auth0 user id — used to find "my own row" in the access list, distinct from canManageAccess (which is about who may remove *anyone*). */
+  currentUserId: string;
+  /** This matter's `created_by`, so the access list can block the creator from removing their own row (see matterMembers.ts's own DELETE /:userId guard — this is the UI-side mirror of that check, not a replacement for it). */
+  matterCreatedBy: string | null;
   style?: CSSProperties;
   tagSets: TagSetDTO[];
   appliedTagsByDocument: Record<string, string[]>;
@@ -66,6 +70,8 @@ export function FilterPanel({
   api,
   matterId,
   canManageAccess,
+  currentUserId,
+  matterCreatedBy,
   style,
   tagSets,
   appliedTagsByDocument,
@@ -300,24 +306,31 @@ export function FilterPanel({
         ) : (
           <table className="access-list">
             <tbody>
-              {members.map((member) => (
-                <tr key={member.userId}>
-                  <td className="access-list-name">{member.name ?? member.email}</td>
-                  {canManageAccess && (
-                    <td className="access-list-remove">
-                      <button
-                        type="button"
-                        className="access-list-remove-btn"
-                        aria-label={`Remove ${member.email}`}
-                        disabled={busyUserId === member.userId}
-                        onClick={() => handleRemoveMember(member)}
-                      >
-                        ×
-                      </button>
-                    </td>
-                  )}
-                </tr>
-              ))}
+              {members.map((member) => {
+                // The creator's own row — server-enforced too (matterMembers.ts's
+                // DELETE /:userId), this is just so the control never looks
+                // clickable in the first place.
+                const isCreatorRemovingSelf = member.userId === currentUserId && currentUserId === matterCreatedBy;
+                return (
+                  <tr key={member.userId}>
+                    <td className="access-list-name">{member.name ?? member.email}</td>
+                    {canManageAccess && (
+                      <td className="access-list-remove">
+                        <button
+                          type="button"
+                          className="access-list-remove-btn"
+                          aria-label={isCreatorRemovingSelf ? "The matter's creator cannot remove themselves" : `Remove ${member.email}`}
+                          title={isCreatorRemovingSelf ? "The matter's creator cannot remove themselves from its access list" : undefined}
+                          disabled={busyUserId === member.userId || isCreatorRemovingSelf}
+                          onClick={() => handleRemoveMember(member)}
+                        >
+                          ×
+                        </button>
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
               {canManageAccess &&
                 (addingRow ? (
                   <tr>

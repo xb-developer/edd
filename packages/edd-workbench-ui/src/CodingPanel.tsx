@@ -125,7 +125,6 @@ export function CodingPanel({
                       key={tag.id}
                       type="button"
                       className={`tag-toggle${isApplied ? " on" : ""}`}
-                      style={isApplied && tag.color ? { background: tag.color } : undefined}
                       onClick={() => toggleTag(tag.id)}
                     >
                       {tag.name}

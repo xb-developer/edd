@@ -359,6 +359,6 @@ describe("askRouter", () => {
     const response = await request(app).post(`/api/matters/${matterId}/ask`).send({ question: "What happened?" });
 
     expect(response.status).toBe(503);
-    expect(response.body.error).toMatch(/business hours|7am|19:00/i);
+    expect(response.body.error).toMatch(/temporarily unavailable/i);
   });
 });

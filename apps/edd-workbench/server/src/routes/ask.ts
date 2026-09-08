@@ -20,7 +20,14 @@ export const askRouter = Router({ mergeParams: true });
 const RETRIEVAL_LIMIT = 12;
 const MAX_COSINE_DISTANCE = 0.5;
 
-const GPU_UNAVAILABLE_MESSAGE = "The AI service is only available 7am–19:00 UK time, Monday–Friday. Please try again during that window.";
+// Deliberately doesn't name a specific cause (e.g. "outside business hours")
+// — embedding/generation only run on a schedule (Mon-Fri 7am-19:00 UK), but
+// this same catch also covers the GPU instance being scheduled-on and simply
+// not warm yet, and real infrastructure failures like a Spot capacity
+// shortage (the launch templates use Spot — see embeddingLaunchTemplate's
+// own comment in the CDK stack). Claiming a specific reason here would be
+// actively misleading whenever it's actually one of the others.
+const GPU_UNAVAILABLE_MESSAGE = "The AI service is temporarily unavailable. Please try again shortly.";
 
 interface RetrievedChunkRow {
   document_id: string;

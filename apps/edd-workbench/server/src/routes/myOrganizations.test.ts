@@ -20,7 +20,7 @@ function buildTestApp(payload: { sub?: string }) {
     next();
   });
   app.use("/api/my-organizations", myOrganizationsRouter);
-  app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  app.use((_err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     res.status(500).json({ error: "Internal server error" });
   });
   return app;

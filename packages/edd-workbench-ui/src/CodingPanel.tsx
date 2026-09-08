@@ -9,6 +9,8 @@ export interface CodingPanelProps {
   /** Independent of `documentId` — the bulk-select checkbox column's checked ids. Non-empty switches the whole panel into bulk-apply mode; `documentId` (the single-preview target) is ignored while that's the case. */
   bulkSelectedDocumentIds: string[];
   onClearBulkSelection: () => void;
+  /** Lifted to MatterDetail (shared with the results table's own tag chips) — needed here so bulk mode can invert each selected document's OWN current state for a tag, not force every document to the same state. */
+  appliedTagsByDocument: Record<string, string[]>;
   /** Lifted to MatterDetail (shared with FilterPanel's tag filter, avoiding a duplicate fetch) rather than fetched here. */
   tagSets: TagSetDTO[];
   /** Called after a tag is applied/removed, or a custom code is created, so FilterPanel's tag-filter counts/options and tagSets stay live. */
@@ -29,6 +31,7 @@ export function CodingPanel({
   documentId,
   bulkSelectedDocumentIds,
   onClearBulkSelection,
+  appliedTagsByDocument,
   tagSets,
   onTagsChanged,
   onPrev,
@@ -55,11 +58,18 @@ export function CodingPanel({
   async function toggleTag(tagId: string) {
     try {
       if (isBulkMode) {
-        // No meaningful "on" state across N documents with mixed existing
-        // tags — every click here means "apply to all N," never toggle-
-        // off. Selection is deliberately not cleared afterward, so a
-        // second code can be applied to the same batch immediately.
-        await api.applyTag(matterId, bulkSelectedDocumentIds, tagId);
+        // A true per-document invert, not "force every selected document
+        // to the same state" — a document that already has this code loses
+        // it, one that doesn't gains it, even within the same click on a
+        // batch with mixed existing state. Selection is deliberately not
+        // cleared afterward, so a second code can be applied to the same
+        // batch immediately.
+        const toRemove = bulkSelectedDocumentIds.filter((id) => (appliedTagsByDocument[id] ?? []).includes(tagId));
+        const toApply = bulkSelectedDocumentIds.filter((id) => !(appliedTagsByDocument[id] ?? []).includes(tagId));
+        await Promise.all([
+          toRemove.length > 0 ? api.removeTag(matterId, toRemove, tagId) : null,
+          toApply.length > 0 ? api.applyTag(matterId, toApply, tagId) : null,
+        ]);
         onTagsChanged();
         return;
       }
@@ -119,14 +129,24 @@ export function CodingPanel({
               <h2 className="panel-title">{tagSet.name}</h2>
               <div className="tag-toggle-grid">
                 {tagSet.tags.map((tag) => {
-                  const isApplied = !isBulkMode && appliedTagIds.includes(tag.id);
+                  if (!isBulkMode) {
+                    const isApplied = appliedTagIds.includes(tag.id);
+                    return (
+                      <button key={tag.id} type="button" className={`tag-toggle${isApplied ? " on" : ""}`} onClick={() => toggleTag(tag.id)}>
+                        {tag.name}
+                      </button>
+                    );
+                  }
+                  // Bulk mode's own three states — not just on/off — since a
+                  // click here inverts each selected document's own current
+                  // state rather than forcing them all the same way; "mixed"
+                  // (some but not all of the batch already has this code)
+                  // needs to look visibly different from a clean "none of
+                  // them do" so the click's real effect isn't a surprise.
+                  const appliedCount = bulkSelectedDocumentIds.filter((id) => (appliedTagsByDocument[id] ?? []).includes(tag.id)).length;
+                  const bulkState = appliedCount === 0 ? "" : appliedCount === bulkSelectedDocumentIds.length ? " on" : " mixed";
                   return (
-                    <button
-                      key={tag.id}
-                      type="button"
-                      className={`tag-toggle${isApplied ? " on" : ""}`}
-                      onClick={() => toggleTag(tag.id)}
-                    >
+                    <button key={tag.id} type="button" className={`tag-toggle${bulkState}`} onClick={() => toggleTag(tag.id)}>
                       {tag.name}
                     </button>
                   );

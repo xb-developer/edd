@@ -978,6 +978,7 @@ export function MatterDetail({ api, matterId, canManageAccess }: MatterDetailPro
                   documentId={selectedDocument.documentId}
                   bulkSelectedDocumentIds={Array.from(checkedDocumentIds)}
                   onClearBulkSelection={() => setCheckedDocumentIds(new Set())}
+                  appliedTagsByDocument={appliedTagsByDocument}
                   tagSets={tagSets}
                   onTagsChanged={refreshTagState}
                   onPrev={goToPrev}

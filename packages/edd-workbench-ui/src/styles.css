@@ -956,6 +956,16 @@ table.reg tbody tr.active {
   border-color: #a9cdf5;
   color: var(--navy);
 }
+/* Bulk mode only — some but not all of the selected documents already have
+   this code. A dashed border on the same light blue, not a fully solid
+   fill, so it reads as "partially applied" rather than "applied," even
+   though the coding button will still invert every selected document's own
+   state (not just add it uniformly) on the next click. */
+.tag-toggle.mixed {
+  background: #eef6fe;
+  border: 1px dashed #a9cdf5;
+  color: var(--navy);
+}
 /* LOGIN / LOADING SCREENS (apps/edd-workbench/client/src/main.tsx) */
 .matter-screen {
   height: 100vh;

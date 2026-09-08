@@ -377,12 +377,16 @@ export const PST_MAX_SIZE_BYTES = 80 * 1024 ** 3;
 // Unlike PST (streamed to a local temp file), a zip is buffered fully in
 // memory via streamToBuffer — its realistic eDiscovery size doesn't need
 // disk-streaming, but that means it directly competes with the worker
-// task's 1024 MiB memory limit (both the raw zip buffer AND each
-// decompressed member's bytes can be live at once during extraction).
-// 400 MiB leaves real headroom for the app's own baseline usage; same
-// "convert a potential crash into a clean recorded failure" reasoning as
-// PST's own ceiling.
-export const ZIP_MAX_SIZE_BYTES = 400 * 1024 ** 2;
+// task's own memory limit (both the raw zip buffer AND each decompressed
+// member's bytes can be live at once during extraction). Raised from
+// 400 MiB to 2 GiB (2026-09-08) alongside a matching bump to
+// WorkerTaskDefinition's memoryLimitMiB (see edd-workbench-stack.ts) —
+// this ceiling and that memory limit must be raised together, never one
+// without the other, or a large-but-under-the-old-ceiling zip OOM-kills
+// the task (exit 137) instead of failing cleanly. Same "convert a
+// potential crash into a clean recorded failure" reasoning as PST's own
+// ceiling.
+export const ZIP_MAX_SIZE_BYTES = 2 * 1024 ** 3;
 
 // A 7z archive is disk-streamed like PST, not memory-buffered like zip —
 // 7z's much higher compression ratios make an in-memory approach a real

@@ -375,8 +375,16 @@ export class EddWorkbenchStack extends cdk.Stack {
     });
 
     const workerTaskDefinition = new ecs.FargateTaskDefinition(this, "WorkerTaskDefinition", {
-      cpu: 512,
-      memoryLimitMiB: 1024,
+      // cpu bumped 512->1024 alongside the memory increase below — Fargate
+      // only allows memoryLimitMiB above 4096 once cpu is at least 1024
+      // (AWS's fixed cpu/memory pairing table for Fargate task sizes).
+      cpu: 1024,
+      // Raised 1024->6144 (2026-09-08) to match ZIP_MAX_SIZE_BYTES's own
+      // bump to 2 GiB (see containerExpansion.ts) — a zip's raw buffer AND
+      // its decompressed members can be live in memory at once, so this
+      // needs real headroom above the 2 GiB ceiling itself, not just
+      // barely fit it. These two numbers must move together.
+      memoryLimitMiB: 6144,
       // Bumped from Fargate's 20 GiB default — PST ingest (see worker's
       // ingest.ts handlePstIngest) streams the whole S3 object to a local
       // temp file rather than buffering it in memory, since a real

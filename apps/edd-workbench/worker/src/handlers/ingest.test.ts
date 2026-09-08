@@ -21,6 +21,7 @@ import {
   MATTER_STORAGE_QUOTA_BYTES,
 } from "@xbundle/edd-workbench-core";
 import { handleIngestMessage } from "./ingest.js";
+import { ZIP_MAX_SIZE_BYTES } from "./containerExpansion.js";
 
 const FIXTURE_EML = Buffer.from(
   [
@@ -1683,7 +1684,7 @@ describe("handleIngestMessage", () => {
   });
 
   it("fails cleanly with a recorded ingest_error, without ever attempting the S3 download, when a zip's size_bytes exceeds the pre-flight ceiling", async () => {
-    const oversizedBytes = 401 * 1024 ** 2; // just over ZIP_MAX_SIZE_BYTES's 400 MiB ceiling
+    const oversizedBytes = ZIP_MAX_SIZE_BYTES + 1;
     const { orgId, documentId } = await setupDocument({
       filename: "huge.zip",
       contentTypeDetected: "zip",

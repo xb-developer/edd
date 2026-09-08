@@ -1,4 +1,4 @@
-import { StrictMode } from "react";
+import { StrictMode, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Auth0Provider, useAuth0 } from "@auth0/auth0-react";
 import { EddWorkbenchWorkspace, DocumentViewerWindow, parseViewerWindowParams } from "@xbundle/edd-workbench-ui";
@@ -18,16 +18,66 @@ import "@xbundle/edd-workbench-ui/src/styles.css";
 // life of the page, and both AppShell and ViewerWindowShell below need it.
 const viewerWindowParams = parseViewerWindowParams(window.location.search);
 
-// Plain login, no `organization` param — the tenant's Login Experience is
-// configured to prompt for the organization itself (see
-// server/src/auth.ts's resolveOrgContext), so the resulting token's
-// trusted org_id claim is all the server needs. Nothing here needs to
-// know about orgs at all; a user simply signs in with whatever Auth0
-// account has been added to the organization and assigned a role there
-// directly (Auth0 Organizations is the sole source of truth for identity
-// and org membership — there's no local invite system).
+// Plain login, no `organization` param — a user can belong to more than one
+// Auth0 Organization (tenant), and Auth0's own Login Experience has no way
+// to ask "which one" without either the user typing an org name/id from
+// memory or DNS-verified email-domain discovery (rejected as unworkable for
+// a multi-tenant product with no control over customers' DNS). So instead:
+// log in once with no org, then (below) look up which Organization(s) this
+// identity belongs to via the server, and complete a SECOND loginWithRedirect
+// scoped to the resolved org. This second round trip is unavoidable, not a
+// workaround — Auth0 has confirmed getAccessTokenSilently cannot silently
+// swap in an org-scoped token; only a real redirect (or popup) with an
+// explicit `organization` param can. The app is designed around one org per
+// user, so zero or multiple orgs are treated as error states below rather
+// than a picker UI.
+type OrgResolutionState = { status: "checking" } | { status: "redirecting" } | { status: "error"; reason: "none" | "multiple" | "failed" };
+
 function AppShell() {
-  const { isAuthenticated, isLoading, loginWithRedirect, logout, getAccessTokenSilently } = useAuth0();
+  const { isAuthenticated, isLoading, loginWithRedirect, logout, getAccessTokenSilently, user } = useAuth0();
+  const [orgResolution, setOrgResolution] = useState<OrgResolutionState | null>(null);
+  // StrictMode double-invokes effects in dev, and this effect's own work
+  // (a Management API call, then a real navigation) must only ever run
+  // once per login — this ref, not effect deps, is what prevents that.
+  const orgResolutionStarted = useRef(false);
+
+  // Only a login routed through an Organization carries this claim on the
+  // ID token (see the comment above) — its absence is exactly "just did the
+  // plain first-stage login, still needs resolving", including on every
+  // render until the redirect below actually navigates away.
+  const needsOrgResolution = isAuthenticated && !user?.org_id;
+
+  useEffect(() => {
+    if (!needsOrgResolution || orgResolutionStarted.current) return;
+    orgResolutionStarted.current = true;
+    setOrgResolution({ status: "checking" });
+
+    (async () => {
+      try {
+        const token = await getAccessTokenSilently({ authorizationParams: { audience: import.meta.env.VITE_AUTH0_AUDIENCE } });
+        const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/my-organizations`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) {
+          throw new Error(`Failed to resolve organization: ${res.status}`);
+        }
+        const body = (await res.json()) as { organizationIds: string[] };
+        if (body.organizationIds.length === 0) {
+          setOrgResolution({ status: "error", reason: "none" });
+          return;
+        }
+        if (body.organizationIds.length > 1) {
+          setOrgResolution({ status: "error", reason: "multiple" });
+          return;
+        }
+        setOrgResolution({ status: "redirecting" });
+        await loginWithRedirect({ authorizationParams: { organization: body.organizationIds[0] } });
+      } catch (err) {
+        console.error(err);
+        setOrgResolution({ status: "error", reason: "failed" });
+      }
+    })();
+  }, [needsOrgResolution, getAccessTokenSilently, loginWithRedirect]);
 
   if (isLoading) {
     return (
@@ -51,6 +101,44 @@ function AppShell() {
             Log in
           </button>
         </div>
+      </div>
+    );
+  }
+
+  if (needsOrgResolution) {
+    if (orgResolution?.status === "error") {
+      const message =
+        orgResolution.reason === "none"
+          ? "Your account isn't assigned to an organization yet. Contact your administrator to be added."
+          : orgResolution.reason === "multiple"
+            ? "Your account belongs to more than one organization, which isn't supported yet. Contact your administrator."
+            : "Something went wrong while signing you in. Please try again.";
+      return (
+        <div className="matter-screen">
+          <div className="matter-card" style={{ textAlign: "center" }}>
+            <div className="brand" style={{ justifyContent: "center", marginBottom: 18 }}>
+              <span className="mark" style={{ borderColor: "var(--navy)", color: "var(--navy)" }}>
+                Co
+              </span>
+              <h1>Collate</h1>
+            </div>
+            <p className="empty-note" style={{ marginBottom: 18 }}>
+              {message}
+            </p>
+            <button
+              type="button"
+              onClick={() => logout({ logoutParams: { returnTo: window.location.origin } })}
+              style={{ width: "100%", padding: "9px 0" }}
+            >
+              Log out
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div className="matter-screen">
+        <p className="empty-note">Signing you in…</p>
       </div>
     );
   }

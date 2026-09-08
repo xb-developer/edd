@@ -27,7 +27,7 @@ async function getManagementToken(): Promise<string> {
   if (!AUTH0_ISSUER_BASE_URL || !clientId || !clientSecret) {
     throw new Error(
       "AUTH0_MGMT_CLIENT_ID and AUTH0_MGMT_CLIENT_SECRET environment variables are required to call the Auth0 Management API " +
-        "(create a Machine-to-Machine Auth0 Application authorized for the Management API with read:organization_members, read:users scopes)",
+        "(create a Machine-to-Machine Auth0 Application authorized for the Management API with read:organization_members, read:users, read:organizations scopes)",
     );
   }
 
@@ -185,6 +185,25 @@ export async function getOrganizationMemberContext(auth0OrgId: string, auth0User
 
   setCached(orgMemberContextCache, cacheKey, result, ORG_MEMBER_CONTEXT_TTL_MS);
   return result;
+}
+
+/**
+ * GET /api/v2/users/{id}/organizations — every Organization this user
+ * belongs to, by id. Called exactly once per login (the client's post-
+ * plain-login "which org do I redirect into" step — see main.tsx), never
+ * per-request, so uncached like listOrganizationMembers above rather than
+ * TTL-cached like getOrganizationMemberContext's own hot-path lookup.
+ */
+export async function getUserOrganizationIds(auth0UserId: string): Promise<string[]> {
+  const token = await getManagementToken();
+  const res = await fetch(issuerUrl(`api/v2/users/${encodeURIComponent(auth0UserId)}/organizations`), {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to get Auth0 user's organizations: ${res.status} ${await res.text()}`);
+  }
+  const orgs = (await res.json()) as { id: string }[];
+  return orgs.map((o) => o.id);
 }
 
 /**

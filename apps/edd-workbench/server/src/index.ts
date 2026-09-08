@@ -6,6 +6,7 @@ import "@xbundle/edd-workbench-core/src/loadEnv.js";
 import express from "express";
 import cors from "cors";
 import { requireValidToken, resolveOrgContext, requireMatterAccess } from "./auth.js";
+import { myOrganizationsRouter } from "./routes/myOrganizations.js";
 import { mattersRouter } from "./routes/matters.js";
 import { documentsRouter } from "./routes/documents.js";
 import { tagsRouter } from "./routes/tags.js";
@@ -63,6 +64,16 @@ app.use("/api", (_req, res, next) => {
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true });
 });
+
+// requireValidToken only, deliberately ahead of the blanket resolveOrgContext
+// mount below — the whole point of this route is answering "which
+// Organization does this identity belong to" for a token that was issued
+// via a PLAIN login (no organization specified yet, so no org_id claim to
+// resolve). See main.tsx's own comment: the client logs in once with no
+// organization, calls this, then does a second loginWithRedirect scoped to
+// the resolved org — Auth0 has no supported way to get an org-scoped token
+// silently, so this round trip is unavoidable, not a workaround.
+app.use("/api/my-organizations", requireValidToken, myOrganizationsRouter);
 
 app.use("/api", requireValidToken, resolveOrgContext);
 

@@ -1,6 +1,5 @@
 import { Router, type Request } from "express";
 import { withOrgSession } from "@xbundle/edd-workbench-core";
-import { requireRole } from "../auth.js";
 
 // mergeParams — mounted at /api/matters/:matterId/tags (see index.ts).
 export const tagsRouter = Router({ mergeParams: true });
@@ -39,8 +38,7 @@ function groupTagSetRows(rows: TagSetRow[]): TagSetDTO[] {
   return order.map((id) => byId.get(id)!);
 }
 
-// No role gate — litigation_support still needs to see coding state to do
-// its own job, it just can't create/apply codes (see requireRole below).
+// No role gate — every org member can see coding state.
 tagsRouter.get("/", async (req: Request<{ matterId: string }>, res, next) => {
   try {
     const { orgId } = req.eddContext!;
@@ -64,12 +62,9 @@ tagsRouter.get("/", async (req: Request<{ matterId: string }>, res, next) => {
   }
 });
 
-// requireRole("admin", "reviewer") — matters.ts's own comment on its
-// litigation_support grant already states the intended split ("can
-// create/manage matters, just not apply reviewer-level tags"); this is the
-// first place that intent is actually enforced, since the coding backend
-// didn't exist before now.
-tagsRouter.post("/custom", requireRole("admin", "reviewer"), async (req: Request<{ matterId: string }>, res, next) => {
+// No role gate — custom-code creation is open to every org member
+// (including litigation_support), not just admin/reviewer.
+tagsRouter.post("/custom", async (req: Request<{ matterId: string }>, res, next) => {
   try {
     const { orgId, userId } = req.eddContext!;
     const { matterId } = req.params;

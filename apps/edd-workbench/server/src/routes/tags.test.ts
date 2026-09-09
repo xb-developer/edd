@@ -177,12 +177,16 @@ describe("tags router", () => {
     }
   });
 
-  it("POST /custom as litigation_support is forbidden", async () => {
+  it("POST /custom as litigation_support succeeds (all roles can create custom codes)", async () => {
     const { orgId, matterId, userId } = await createTestOrgAndMatter("tags-role-gate");
     try {
       const app = buildTestApp({ orgId, userId, role: "litigation_support", email: "tester@example.com" });
-      const response = await request(app).post(`/api/matters/${matterId}/tags/custom`).send({ name: "Should Not Work" });
-      expect(response.status).toBe(403);
+      const response = await request(app).post(`/api/matters/${matterId}/tags/custom`).send({ name: "Should Work" });
+      expect(response.status).toBe(201);
+
+      const sets = await request(app).get(`/api/matters/${matterId}/tags`);
+      const customSet = sets.body.find((s: { name: string }) => s.name === "Custom");
+      expect(customSet.tags.map((t: { name: string }) => t.name)).toContain("Should Work");
     } finally {
       await deleteTestOrg(orgId);
     }

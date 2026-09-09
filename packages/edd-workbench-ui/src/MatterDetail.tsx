@@ -260,6 +260,11 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
   // at 3, not from 7) — repeated shift-clicks stay anchored to the same
   // starting row until the next plain click.
   const [checkboxAnchorId, setCheckboxAnchorId] = useState<string | null>(null);
+  // Captured on the checkbox's own onClick (see below) so onChange — which
+  // is what actually drives the check/uncheck — knows whether shift was
+  // held. A ref, not state: this is read once, synchronously, by the very
+  // next event in the same click, never across a render.
+  const checkboxShiftKeyRef = useRef(false);
 
   function toggleChecked(documentId: string) {
     setCheckedDocumentIds((prev) => {
@@ -911,21 +916,30 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
                             <input
                               type="checkbox"
                               checked={checkedDocumentIds.has(doc.documentId)}
-                              // onClick, not onChange — preventDefault stops
-                              // the native toggle so a shift-click's range
-                              // selection (which may need to check several
-                              // boxes, not just this one) is fully manual;
-                              // MouseEvent.shiftKey isn't available on a
-                              // checkbox's change event. Also selects/
-                              // previews the row like a plain row click
-                              // would — a checkbox click should still feel
-                              // like clicking the row, just with its own
+                              // Deliberately NOT preventDefault-and-do-
+                              // everything-in-onClick — that fights React's
+                              // own controlled-checkbox reconciliation (the
+                              // DOM's native toggle gets suppressed, but
+                              // React's tracking of "did this input change"
+                              // can desync from it, and the checkbox visibly
+                              // stops responding to clicks at all — a real
+                              // regression caught by real testing, not a
+                              // guess). Instead: let the click proceed
+                              // natively (onClick here only captures
+                              // shiftKey, since MouseEvent.shiftKey isn't
+                              // available on a checkbox's change event), and
+                              // do the actual state update in onChange,
+                              // which fires right after — the standard,
+                              // reliable React pattern for a controlled
+                              // checkbox. Also selects/previews the row like
+                              // a plain row click would, with its own
                               // toggle-only-this-one check-state behavior
-                              // instead of the row's replace-the-selection
-                              // one (see handleCheckboxClick's own comment).
+                              // (see handleCheckboxClick's own comment).
                               onClick={(e) => {
-                                e.preventDefault();
-                                handleCheckboxClick(doc.documentId, e.shiftKey, sortedDocuments);
+                                checkboxShiftKeyRef.current = e.shiftKey;
+                              }}
+                              onChange={() => {
+                                handleCheckboxClick(doc.documentId, checkboxShiftKeyRef.current, sortedDocuments);
                                 setSelectedDocumentId(doc.documentId);
                                 viewerWindow.focusPopout();
                               }}

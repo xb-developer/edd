@@ -308,8 +308,11 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
   // The checkbox column is the escape hatch for building an arbitrary,
   // non-contiguous multi-selection without disturbing what's already
   // checked: unlike a row click, a plain checkbox click only toggles this
-  // one row (add or remove), leaving every other checked row alone. Shift
-  // still range-extends, same as a row shift-click.
+  // one row's *checked* state (add or remove), leaving every other checked
+  // row alone. Shift still range-extends, same as a row shift-click. Its
+  // own click handler also sets selectedDocumentId, same as a row click —
+  // only the checked-set semantics differ, not whether it selects/
+  // previews the row.
   function handleCheckboxClick(documentId: string, shiftKey: boolean, visibleDocuments: DocumentDTO[]) {
     if (shiftKey && extendCheckedRange(documentId, visibleDocuments)) return;
     toggleChecked(documentId);
@@ -913,10 +916,18 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
                               // selection (which may need to check several
                               // boxes, not just this one) is fully manual;
                               // MouseEvent.shiftKey isn't available on a
-                              // checkbox's change event.
+                              // checkbox's change event. Also selects/
+                              // previews the row like a plain row click
+                              // would — a checkbox click should still feel
+                              // like clicking the row, just with its own
+                              // toggle-only-this-one check-state behavior
+                              // instead of the row's replace-the-selection
+                              // one (see handleCheckboxClick's own comment).
                               onClick={(e) => {
                                 e.preventDefault();
                                 handleCheckboxClick(doc.documentId, e.shiftKey, sortedDocuments);
+                                setSelectedDocumentId(doc.documentId);
+                                viewerWindow.focusPopout();
                               }}
                               aria-label={`Select ${doc.originalFilename}`}
                             />

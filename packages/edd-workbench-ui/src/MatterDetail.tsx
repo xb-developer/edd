@@ -1068,6 +1068,7 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
                   onNext={goToNext}
                   canGoPrev={selectedIndex > 0}
                   canGoNext={selectedIndex >= 0 && selectedIndex < sortedDocuments.length - 1}
+                  onFocusPopout={viewerWindow.focusPopout}
                 />
               </>
             )}

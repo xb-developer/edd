@@ -20,6 +20,8 @@ export interface CodingPanelProps {
   onNext: () => void;
   canGoPrev: boolean;
   canGoNext: boolean;
+  /** viewerWindow.focusPopout — every button here is a click inside the main window, which would otherwise drop an open pop-out behind it (see useViewerWindow's doc comment); call before each action, same as MatterDetail's row/checkbox handlers. */
+  onFocusPopout: () => void;
 }
 
 // Scaffolded ahead of the coding/tagging backend originally (see api.ts's
@@ -38,6 +40,7 @@ export function CodingPanel({
   onNext,
   canGoPrev,
   canGoNext,
+  onFocusPopout,
 }: CodingPanelProps) {
   const [appliedTagIds, setAppliedTagIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -107,15 +110,38 @@ export function CodingPanel({
       <div className="pane-title-row">
         <h2 className="panel-title">{isBulkMode ? `Applying to ${bulkSelectedDocumentIds.length} selected document${bulkSelectedDocumentIds.length === 1 ? "" : "s"}` : "Coding"}</h2>
         {isBulkMode ? (
-          <button type="button" className="pop-out-btn" onClick={onClearBulkSelection}>
+          <button
+            type="button"
+            className="pop-out-btn"
+            onClick={() => {
+              onFocusPopout();
+              onClearBulkSelection();
+            }}
+          >
             Clear selection
           </button>
         ) : (
           <div className="doc-nav-btns">
-            <button type="button" className="pop-out-btn" disabled={!canGoPrev} onClick={onPrev}>
+            <button
+              type="button"
+              className="pop-out-btn"
+              disabled={!canGoPrev}
+              onClick={() => {
+                onFocusPopout();
+                onPrev();
+              }}
+            >
               ‹ Prev
             </button>
-            <button type="button" className="pop-out-btn" disabled={!canGoNext} onClick={onNext}>
+            <button
+              type="button"
+              className="pop-out-btn"
+              disabled={!canGoNext}
+              onClick={() => {
+                onFocusPopout();
+                onNext();
+              }}
+            >
               Next ›
             </button>
           </div>
@@ -132,7 +158,15 @@ export function CodingPanel({
                   if (!isBulkMode) {
                     const isApplied = appliedTagIds.includes(tag.id);
                     return (
-                      <button key={tag.id} type="button" className={`tag-toggle${isApplied ? " on" : ""}`} onClick={() => toggleTag(tag.id)}>
+                      <button
+                        key={tag.id}
+                        type="button"
+                        className={`tag-toggle${isApplied ? " on" : ""}`}
+                        onClick={() => {
+                          onFocusPopout();
+                          toggleTag(tag.id);
+                        }}
+                      >
                         {tag.name}
                       </button>
                     );
@@ -146,7 +180,15 @@ export function CodingPanel({
                   const appliedCount = bulkSelectedDocumentIds.filter((id) => (appliedTagsByDocument[id] ?? []).includes(tag.id)).length;
                   const bulkState = appliedCount === 0 ? "" : appliedCount === bulkSelectedDocumentIds.length ? " on" : " mixed";
                   return (
-                    <button key={tag.id} type="button" className={`tag-toggle${bulkState}`} onClick={() => toggleTag(tag.id)}>
+                    <button
+                      key={tag.id}
+                      type="button"
+                      className={`tag-toggle${bulkState}`}
+                      onClick={() => {
+                        onFocusPopout();
+                        toggleTag(tag.id);
+                      }}
+                    >
                       {tag.name}
                     </button>
                   );
@@ -163,9 +205,22 @@ export function CodingPanel({
               placeholder="New code name…"
               value={customTagName}
               onChange={(e) => setCustomTagName(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleCreateCustomTag()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  onFocusPopout();
+                  handleCreateCustomTag();
+                }
+              }}
             />
-            <button type="button" className="pop-out-btn" disabled={!customTagName.trim() || creatingTag} onClick={handleCreateCustomTag}>
+            <button
+              type="button"
+              className="pop-out-btn"
+              disabled={!customTagName.trim() || creatingTag}
+              onClick={() => {
+                onFocusPopout();
+                handleCreateCustomTag();
+              }}
+            >
               {creatingTag ? "Adding…" : "Add"}
             </button>
           </div>

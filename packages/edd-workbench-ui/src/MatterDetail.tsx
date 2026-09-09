@@ -247,17 +247,18 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
     setAskResult(result);
     setAskRelevantDocumentIds(result ? new Set(result.relevantDocuments.map((d) => d.documentId)) : null);
   }
-  // Fully independent of selectedDocumentId (which drives the single-doc
-  // preview) — this is the bulk-coding/export selection. Deliberately not
-  // pruned when a search/tag filter hides a row; see the toolbar's
-  // visible/hidden count split below.
+  // Not pruned when a search/tag filter hides a row; see the toolbar's
+  // visible/hidden count split below. Row clicks (handleRowSelect) and the
+  // checkbox column (handleCheckboxClick) both drive this now, with
+  // different plain-click semantics — see each function's own comment.
   const [checkedDocumentIds, setCheckedDocumentIds] = useState<Set<string>>(new Set());
-  // The last plain (non-shift) checkbox click — what a subsequent
-  // shift-click ranges *from*. Deliberately doesn't move on a shift-click
-  // itself (standard file-manager convention: click 3, shift-click 7
-  // selects 3-7; a further shift-click 1 selects 1-3, ranging from the
-  // original anchor at 3, not from 7) — repeated shift-clicks stay
-  // anchored to the same starting row until the next plain click.
+  // The last plain (non-shift) click that set the selection anchor — what a
+  // subsequent shift-click ranges *from*. Shared between row clicks and
+  // checkbox clicks. Deliberately doesn't move on a shift-click itself
+  // (standard file-manager convention: click 3, shift-click 7 selects 3-7;
+  // a further shift-click 1 selects 1-3, ranging from the original anchor
+  // at 3, not from 7) — repeated shift-clicks stay anchored to the same
+  // starting row until the next plain click.
   const [checkboxAnchorId, setCheckboxAnchorId] = useState<string | null>(null);
 
   function toggleChecked(documentId: string) {
@@ -269,27 +270,48 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
     });
   }
 
-  // Shift-click range select, additive — everything between the anchor and
-  // the clicked row (inclusive, in current sorted/visible row order) gets
-  // added to the existing selection; anything already checked outside that
-  // range stays checked, matching the standard OS file-manager convention.
-  // A shift-click with no live anchor (first-ever click, or the anchor row
-  // scrolled out of the current filter/sort) just falls back to a plain
-  // toggle, same as clicking without shift.
+  // Shared shift-click range logic for both row clicks and checkbox clicks:
+  // everything between the anchor and the clicked row (inclusive, in
+  // current sorted/visible row order) gets added to the existing selection
+  // — anything already checked outside that range stays checked, matching
+  // the standard OS file-manager convention. Returns false (meaning: no
+  // live anchor to range from — first-ever click, or the anchor row got
+  // filtered/sorted out) so the caller can fall back to its own
+  // non-shift-click behavior instead.
+  function extendCheckedRange(documentId: string, visibleDocuments: DocumentDTO[]): boolean {
+    if (!checkboxAnchorId) return false;
+    const anchorIndex = visibleDocuments.findIndex((d) => d.documentId === checkboxAnchorId);
+    const clickedIndex = visibleDocuments.findIndex((d) => d.documentId === documentId);
+    if (anchorIndex === -1 || clickedIndex === -1) return false;
+    const [start, end] = anchorIndex <= clickedIndex ? [anchorIndex, clickedIndex] : [clickedIndex, anchorIndex];
+    setCheckedDocumentIds((prev) => {
+      const next = new Set(prev);
+      for (let i = start; i <= end; i++) next.add(visibleDocuments[i].documentId);
+      return next;
+    });
+    return true;
+  }
+
+  // Clicking a row is the primary way to build a multi-selection (Explorer/
+  // Finder-style): a plain click *starts* a fresh selection of just this
+  // row (replacing whatever was checked before), and a shift-click extends
+  // the range from the anchor, adding to — not replacing — the existing
+  // selection. Doesn't touch selectedDocumentId/focusPopout (the row's own
+  // onClick still does that alongside this, for the unrelated single-doc
+  // preview).
+  function handleRowSelect(documentId: string, shiftKey: boolean, visibleDocuments: DocumentDTO[]) {
+    if (shiftKey && extendCheckedRange(documentId, visibleDocuments)) return;
+    setCheckedDocumentIds(new Set([documentId]));
+    setCheckboxAnchorId(documentId);
+  }
+
+  // The checkbox column is the escape hatch for building an arbitrary,
+  // non-contiguous multi-selection without disturbing what's already
+  // checked: unlike a row click, a plain checkbox click only toggles this
+  // one row (add or remove), leaving every other checked row alone. Shift
+  // still range-extends, same as a row shift-click.
   function handleCheckboxClick(documentId: string, shiftKey: boolean, visibleDocuments: DocumentDTO[]) {
-    if (shiftKey && checkboxAnchorId) {
-      const anchorIndex = visibleDocuments.findIndex((d) => d.documentId === checkboxAnchorId);
-      const clickedIndex = visibleDocuments.findIndex((d) => d.documentId === documentId);
-      if (anchorIndex !== -1 && clickedIndex !== -1) {
-        const [start, end] = anchorIndex <= clickedIndex ? [anchorIndex, clickedIndex] : [clickedIndex, anchorIndex];
-        setCheckedDocumentIds((prev) => {
-          const next = new Set(prev);
-          for (let i = start; i <= end; i++) next.add(visibleDocuments[i].documentId);
-          return next;
-        });
-        return;
-      }
-    }
+    if (shiftKey && extendCheckedRange(documentId, visibleDocuments)) return;
     toggleChecked(documentId);
     setCheckboxAnchorId(documentId);
   }
@@ -869,8 +891,9 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
                         <tr
                           key={doc.documentId}
                           className={doc.documentId === selectedDocumentId ? "active" : ""}
-                          onClick={() => {
+                          onClick={(e) => {
                             setSelectedDocumentId(doc.documentId);
+                            handleRowSelect(doc.documentId, e.shiftKey, sortedDocuments);
                             // Clicking anywhere in the main window naturally
                             // gives it focus, which would drop an open
                             // pop-out behind it — hand focus straight back,

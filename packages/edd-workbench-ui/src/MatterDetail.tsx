@@ -252,6 +252,13 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
   // pruned when a search/tag filter hides a row; see the toolbar's
   // visible/hidden count split below.
   const [checkedDocumentIds, setCheckedDocumentIds] = useState<Set<string>>(new Set());
+  // The last plain (non-shift) checkbox click — what a subsequent
+  // shift-click ranges *from*. Deliberately doesn't move on a shift-click
+  // itself (standard file-manager convention: click 3, shift-click 7
+  // selects 3-7; a further shift-click 1 selects 1-3, ranging from the
+  // original anchor at 3, not from 7) — repeated shift-clicks stay
+  // anchored to the same starting row until the next plain click.
+  const [checkboxAnchorId, setCheckboxAnchorId] = useState<string | null>(null);
 
   function toggleChecked(documentId: string) {
     setCheckedDocumentIds((prev) => {
@@ -260,6 +267,31 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
       else next.add(documentId);
       return next;
     });
+  }
+
+  // Shift-click range select, additive — everything between the anchor and
+  // the clicked row (inclusive, in current sorted/visible row order) gets
+  // added to the existing selection; anything already checked outside that
+  // range stays checked, matching the standard OS file-manager convention.
+  // A shift-click with no live anchor (first-ever click, or the anchor row
+  // scrolled out of the current filter/sort) just falls back to a plain
+  // toggle, same as clicking without shift.
+  function handleCheckboxClick(documentId: string, shiftKey: boolean, visibleDocuments: DocumentDTO[]) {
+    if (shiftKey && checkboxAnchorId) {
+      const anchorIndex = visibleDocuments.findIndex((d) => d.documentId === checkboxAnchorId);
+      const clickedIndex = visibleDocuments.findIndex((d) => d.documentId === documentId);
+      if (anchorIndex !== -1 && clickedIndex !== -1) {
+        const [start, end] = anchorIndex <= clickedIndex ? [anchorIndex, clickedIndex] : [clickedIndex, anchorIndex];
+        setCheckedDocumentIds((prev) => {
+          const next = new Set(prev);
+          for (let i = start; i <= end; i++) next.add(visibleDocuments[i].documentId);
+          return next;
+        });
+        return;
+      }
+    }
+    toggleChecked(documentId);
+    setCheckboxAnchorId(documentId);
   }
 
   // Selects/clears only the currently-visible (filtered) documents —
@@ -853,7 +885,16 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
                             <input
                               type="checkbox"
                               checked={checkedDocumentIds.has(doc.documentId)}
-                              onChange={() => toggleChecked(doc.documentId)}
+                              // onClick, not onChange — preventDefault stops
+                              // the native toggle so a shift-click's range
+                              // selection (which may need to check several
+                              // boxes, not just this one) is fully manual;
+                              // MouseEvent.shiftKey isn't available on a
+                              // checkbox's change event.
+                              onClick={(e) => {
+                                e.preventDefault();
+                                handleCheckboxClick(doc.documentId, e.shiftKey, sortedDocuments);
+                              }}
                               aria-label={`Select ${doc.originalFilename}`}
                             />
                           </td>

@@ -1099,13 +1099,39 @@ function handler(event) {
 
     // Uploads the built SPA (run `npm run build` in apps/edd-workbench/client
     // first — see that app's .env.production.example for the values it needs
-    // baked in) and invalidates the cache so a deploy doesn't leave stale
-    // assets behind. Source directory must exist at synth time — this stack
-    // cannot build the client itself (that needs real Auth0 values chosen
-    // per environment, not something CDK should be deciding).
+    // baked in) and invalidates the CloudFront cache so a deploy doesn't
+    // leave stale assets behind at the edge. Source directory must exist at
+    // synth time — this stack cannot build the client itself (that needs
+    // real Auth0 values chosen per environment, not something CDK should be
+    // deciding).
+    //
+    // Split into two deployments deliberately: S3 sets no Cache-Control
+    // header at all by default, which isn't the "don't cache" you'd expect
+    // — a browser can apply its own heuristic freshness window to a plain
+    // GET even with no explicit Cache-Control present (the same category of
+    // bug already found and fixed for /api/matters's ETag/304 behavior —
+    // see index.ts's own comment), so a real deploy landing at the edge
+    // (confirmed via a completed CloudFront invalidation) still wasn't
+    // enough — a browser could keep serving a stale index.html, and
+    // therefore the *old* hashed JS bundle it references, well after the
+    // fix it needed was already live. The hashed assets/* files are safe to
+    // cache forever (their filename changes whenever their content does,
+    // so there's nothing to go stale) — only index.html itself, the one
+    // file whose content changes without its own filename changing, needs
+    // an explicit no-cache.
     new s3deploy.BucketDeployment(this, "SpaDeployment", {
       sources: [s3deploy.Source.asset("../../apps/edd-workbench/client/dist")],
       destinationBucket: spaBucket,
+      exclude: ["index.html"],
+      distribution,
+      distributionPaths: ["/*"],
+    });
+    new s3deploy.BucketDeployment(this, "SpaIndexDeployment", {
+      sources: [s3deploy.Source.asset("../../apps/edd-workbench/client/dist")],
+      destinationBucket: spaBucket,
+      exclude: ["*"],
+      include: ["index.html"],
+      cacheControl: [s3deploy.CacheControl.noCache(), s3deploy.CacheControl.mustRevalidate()],
       distribution,
       distributionPaths: ["/*"],
     });

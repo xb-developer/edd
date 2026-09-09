@@ -26,7 +26,7 @@ interface DocumentRow {
  * Deliberately does NOT hold one DB transaction open across the embedding
  * call itself — same reasoning as ocrQueue.ts: the embedding service is a
  * self-hosted GPU instance that's only warm on a schedule (see the CDK
- * stack's EmbeddingService), so a call here can legitimately take from
+ * stack's GpuService), so a call here can legitimately take from
  * seconds (warm) to minutes (cold-starting the instance) to fail outright
  * (outside the scheduled window) — a checked-out pool connection must
  * never sit idle-in-transaction for that long.

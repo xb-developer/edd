@@ -282,16 +282,18 @@ export class EddWorkbenchStack extends cdk.Stack {
     // needed inside a deployed api/worker image.
     const dockerAssetExcludes = ["infra", "node_modules", "**/node_modules", "**/.env", "**/.env.*", "**/*.pst", "**/*.ost"];
 
-    // A literal, not derived from the EmbeddingService construct defined
-    // later in this file — Cloud Map private-DNS names are deterministic
+    // A literal, not derived from the GpuService construct defined later in
+    // this file — Cloud Map private-DNS names are deterministic
     // ({serviceName}.{namespaceName}), so anything needing this URL
-    // (the worker's own environment, set above the embedding service's own
+    // (the worker's own environment, set above the GPU service's own
     // declaration) doesn't need a forward reference to that construct.
-    const EMBEDDING_SERVICE_INTERNAL_URL = "http://embedding.edd-workbench.internal:8000";
+    // Embedding and generation are co-located on the same instance/service
+    // (see the GPU service section below) — same host, distinct ports.
+    const EMBEDDING_SERVICE_INTERNAL_URL = "http://gpu.edd-workbench.internal:8000";
     // Same reasoning as EMBEDDING_SERVICE_INTERNAL_URL above — a literal
-    // Cloud Map DNS name, not a forward reference to the GenerationService
+    // Cloud Map DNS name, not a forward reference to the GpuService
     // construct defined later in this file.
-    const GENERATION_SERVICE_INTERNAL_URL = "http://generation.edd-workbench.internal:8000";
+    const GENERATION_SERVICE_INTERNAL_URL = "http://gpu.edd-workbench.internal:8001";
     // Same reasoning again — a literal Cloud Map DNS name, not a forward
     // reference to the ElasticsearchService construct defined later in this
     // file. Port 9200 is Elasticsearch's own default HTTP port.
@@ -407,8 +409,8 @@ export class EddWorkbenchStack extends cdk.Stack {
         EDD_WORKBENCH_OCR_QUEUE_URL: ocrQueue.queueUrl,
         EDD_WORKBENCH_EMBEDDING_QUEUE_URL: embeddingQueue.queueUrl,
         EDD_WORKBENCH_SEARCHINDEX_QUEUE_URL: searchIndexQueue.queueUrl,
-        // Deterministic Cloud Map DNS name (see EmbeddingService below) —
-        // a literal, not a reference to that construct, so this container
+        // Deterministic Cloud Map DNS name (see GpuService below) — a
+        // literal, not a reference to that construct, so this container
         // definition doesn't need to be declared after it.
         EMBEDDING_SERVICE_URL: EMBEDDING_SERVICE_INTERNAL_URL,
         ELASTICSEARCH_SERVICE_URL: ELASTICSEARCH_SERVICE_INTERNAL_URL,
@@ -550,7 +552,8 @@ export class EddWorkbenchStack extends cdk.Stack {
       ],
     });
 
-    // --- Embedding service (self-hosted Qwen3-Embedding-8B via vLLM) ------
+    // --- GPU service (self-hosted Qwen3-Embedding-0.6B + Qwen3-4B via vLLM,
+    // co-located on one instance) -------------------------------------------
     // A genuinely different compute shape from everything else in this
     // stack: Fargate has no GPU support at all, so this needs real EC2
     // capacity, not another Fargate task. Added as an EC2 capacity
@@ -558,6 +561,25 @@ export class EddWorkbenchStack extends cdk.Stack {
     // there's no Kubernetes here, and there doesn't need to be one just
     // for this) so it still uses the same ECS task-definition/service/
     // logging patterns as every other service in this file.
+    //
+    // One instance, one task, two vLLM processes — replacing what used to
+    // be two entirely separate instances/services (one embedding, one
+    // generation). ECS treats GPU as an exclusive per-container
+    // resourceRequirement: two containers each declaring `gpuCount: 1`
+    // cannot both be placed on a single-GPU instance (ECS sums the
+    // requirement across every container in a task/instance and refuses
+    // to place if it exceeds what's available). The only way to actually
+    // share one physical GPU between two model servers under ECS's
+    // placement model is to run both inside ONE container as sibling
+    // processes, with only one gpuCount:1 declared for the whole task —
+    // the GPU sharing itself then happens the ordinary way two CUDA
+    // processes share a card (each gets its own --gpu-memory-utilization
+    // slice of VRAM; the driver time-slices compute between them). This
+    // only became possible by moving off the original Qwen3-Embedding-8B
+    // (14.11 GiB bf16 weights) + Qwen3-8B (~16GiB) pair, which never fit
+    // one L4's ~22GiB together — see ai-model-decision.md's "Investigation:
+    // smaller models" section for the quality-risk tradeoff this accepts
+    // (not yet validated against real documents).
     //
     // "Warm on a schedule": the RAG cost-tier research this is built from
     // assumed Kubernetes tooling (KEDA Cron Scaler, Karpenter) that has no
@@ -567,7 +589,7 @@ export class EddWorkbenchStack extends cdk.Stack {
     // "compute reacts to demand" idea Karpenter implements for EKS), and
     // two EventBridge Scheduler rules are the only thing that ever touches
     // desiredCount directly (1 during business hours, 0 outside) — see
-    // EmbeddingScheduleStart/Stop below. Nothing schedules the ASG's own
+    // GpuScheduleStart/Stop below. Nothing schedules the ASG's own
     // capacity separately; that would risk the two drifting out of sync.
     // A launch template, not the AutoScalingGroup's own inline instanceType/
     // machineImage props — those trigger CDK's legacy Launch Configuration
@@ -576,39 +598,30 @@ export class EddWorkbenchStack extends cdk.Stack {
     // a real CREATE_FAILED, not a guessed-around risk). Needs its own
     // explicit security group since the launch-template path doesn't
     // auto-create one the way the legacy path did.
-    const embeddingInstanceSecurityGroup = new ec2.SecurityGroup(this, "EmbeddingInstanceSecurityGroup", {
+    const gpuInstanceSecurityGroup = new ec2.SecurityGroup(this, "GpuInstanceSecurityGroup", {
       vpc,
-      description: "EDD Workbench embedding GPU instance - outbound only (pulls vLLM image and model weights)",
+      description: "EDD Workbench GPU instance (embedding + generation) - outbound only (pulls vLLM image and model weights)",
       allowAllOutbound: true,
     });
-    const embeddingInstanceRole = new iam.Role(this, "EmbeddingInstanceRole", {
+    const gpuInstanceRole = new iam.Role(this, "GpuInstanceRole", {
       assumedBy: new iam.ServicePrincipal("ec2.amazonaws.com"),
       managedPolicies: [
         iam.ManagedPolicy.fromAwsManagedPolicyName("service-role/AmazonEC2ContainerServiceforEC2Role"),
       ],
     });
-    const embeddingLaunchTemplate = new ec2.LaunchTemplate(this, "EmbeddingLaunchTemplate", {
+    const gpuLaunchTemplate = new ec2.LaunchTemplate(this, "GpuLaunchTemplate", {
       instanceType: ec2.InstanceType.of(ec2.InstanceClass.G6, ec2.InstanceSize.XLARGE),
       machineImage: ecs.EcsOptimizedImage.amazonLinux2(ecs.AmiHardwareType.GPU),
-      securityGroup: embeddingInstanceSecurityGroup,
-      // Spot, not on-demand — a real cost audit (2026-09-04) found g6.xlarge
-      // spot pricing in eu-west-2 running ~65% below on-demand. Safe here
-      // specifically because this instance already only ever runs on a
-      // schedule with minCapacity 0 (see embeddingAsg below) and every
-      // caller already has a graceful "AI service unavailable" fallback for
-      // exactly the case of this instance not being up (see ask.ts/
-      // embedding.ts's own GPU_UNAVAILABLE_MESSAGE handling for the
-      // outside-business-hours case) — a Spot interruption just hits that
-      // same existing path, not a new failure mode. No maxPrice set:
-      // defaults to the on-demand rate as a ceiling, so this can never cost
-      // MORE than what was already budgeted for, only less.
-      spotOptions: { requestType: ec2.SpotRequestType.ONE_TIME },
+      securityGroup: gpuInstanceSecurityGroup,
+      // On-demand — see git history (2026-09-08) for the sustained
+      // g6.xlarge Spot capacity shortage that motivated this; no
+      // spotOptions here at all now.
       // AsgCapacityProvider needs both of these to be explicit and
       // pre-attached — it can't inject an instance profile/role or amend
       // user data on an already-created launch template, unlike the legacy
       // inline-props path. Role: standard ECS-agent EC2 instance role, so
       // the agent can register the instance with the cluster.
-      role: embeddingInstanceRole,
+      role: gpuInstanceRole,
       // AsgCapacityProvider needs to append the ECS-agent bootstrap
       // (ECS_CLUSTER=... in /etc/ecs/ecs.config) to this launch template's
       // user data. It can only do that if we hand it an explicit UserData
@@ -616,20 +629,20 @@ export class EddWorkbenchStack extends cdk.Stack {
       // already-created launch template and synth fails.
       userData: ec2.UserData.forLinux(),
       // Default 30GB root volume is tight once you add the GPU AMI's own
-      // footprint, the vLLM Docker image, and Qwen3-Embedding-8B's
-      // downloaded weights (all re-downloaded on every scheduled start in
-      // this v1 — see the bootstrap comment above the task definition).
+      // footprint, the vLLM Docker image, and both models' downloaded
+      // weights (all re-downloaded on every scheduled start in this v1 —
+      // see the bootstrap comment above the task definition).
       blockDevices: [{ deviceName: "/dev/xvda", volume: autoscaling.BlockDeviceVolume.ebs(100) }],
     });
-    const embeddingAsg = new autoscaling.AutoScalingGroup(this, "EmbeddingAsg", {
+    const gpuAsg = new autoscaling.AutoScalingGroup(this, "GpuAsg", {
       vpc,
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
-      launchTemplate: embeddingLaunchTemplate,
+      launchTemplate: gpuLaunchTemplate,
       minCapacity: 0,
       maxCapacity: 1,
     });
-    const embeddingCapacityProvider = new ecs.AsgCapacityProvider(this, "EmbeddingCapacityProvider", {
-      autoScalingGroup: embeddingAsg,
+    const gpuCapacityProvider = new ecs.AsgCapacityProvider(this, "GpuCapacityProvider", {
+      autoScalingGroup: gpuAsg,
       enableManagedScaling: true,
       targetCapacityPercent: 100,
       // Managed termination protection would stop the ASG from
@@ -637,272 +650,193 @@ export class EddWorkbenchStack extends cdk.Stack {
       // opposite of what "actually stop paying for it overnight" needs.
       enableManagedTerminationProtection: false,
     });
-    cluster.addAsgCapacityProvider(embeddingCapacityProvider);
+    cluster.addAsgCapacityProvider(gpuCapacityProvider);
 
-    // Private-DNS Cloud Map namespace so the worker can reach this service
-    // by a stable internal name (EMBEDDING_SERVICE_INTERNAL_URL above)
-    // rather than an IP that changes every time the instance is replaced.
+    // Private-DNS Cloud Map namespace so the worker/api can reach this
+    // service by a stable internal name (EMBEDDING_SERVICE_INTERNAL_URL /
+    // GENERATION_SERVICE_INTERNAL_URL above) rather than an IP that
+    // changes every time the instance is replaced. Both URLs now resolve
+    // to the SAME host, differing only by port (8000 embedding, 8001
+    // generation).
     const internalNamespace = new servicediscovery.PrivateDnsNamespace(this, "InternalNamespace", {
       name: "edd-workbench.internal",
       vpc,
     });
 
-    const embeddingSecurityGroup = new ec2.SecurityGroup(this, "EmbeddingServiceSecurityGroup", {
+    const gpuSecurityGroup = new ec2.SecurityGroup(this, "GpuServiceSecurityGroup", {
       vpc,
-      description: "EDD Workbench embedding service (vLLM) - inbound from the worker and api only",
+      description: "EDD Workbench GPU service (vLLM embedding + generation) - inbound from worker (embedding port only) and api (both ports)",
       allowAllOutbound: true, // needs real internet egress: pulls the vLLM image from Docker Hub and the model weights from Hugging Face
     });
-    embeddingSecurityGroup.addIngressRule(
+    gpuSecurityGroup.addIngressRule(
       workerService.connections.securityGroups[0],
       ec2.Port.tcp(8000),
       // EC2 security group rule descriptions reject apostrophes (and most
       // other punctuation) — found the hard way via a real CREATE_FAILED,
       // not guessed up front.
-      "Worker service to embedding service (vLLM OpenAI-compatible API)",
+      "Worker service to embedding port (vLLM OpenAI-compatible API)",
     );
     // ask.ts (api service) embeds the incoming question directly, alongside
-    // the worker's existing use of this same service for document ingest.
-    embeddingSecurityGroup.addIngressRule(
+    // the worker's existing use of the embedding port for document ingest,
+    // and is the only caller of the generation port.
+    gpuSecurityGroup.addIngressRule(
       apiService.service.connections.securityGroups[0],
       ec2.Port.tcp(8000),
-      "Api service to embedding service (vLLM OpenAI-compatible API)",
+      "Api service to embedding port (vLLM OpenAI-compatible API)",
+    );
+    gpuSecurityGroup.addIngressRule(
+      apiService.service.connections.securityGroups[0],
+      ec2.Port.tcp(8001),
+      "Api service to generation port (vLLM OpenAI-compatible API)",
     );
 
-    const embeddingTaskDefinition = new ecs.Ec2TaskDefinition(this, "EmbeddingTaskDefinition", {
+    const gpuTaskDefinition = new ecs.Ec2TaskDefinition(this, "GpuTaskDefinition", {
       networkMode: ecs.NetworkMode.AWS_VPC,
     });
-    embeddingTaskDefinition.addContainer("embedding", {
+    gpuTaskDefinition.addContainer("gpu", {
       // The official vLLM image, not a Dockerfile of our own — there's no
-      // application code here to bake in, only a public inference engine
-      // pointed at a public model id. Baking a custom AMI/image with the
-      // model weights pre-loaded (to cut the every-scheduled-start
-      // download cost) is a real, worthwhile follow-up once this is
-      // proven, not a v1 requirement.
+      // application code here to bake in, only a public inference engine.
+      // entryPoint overrides the image's default ("vllm serve", which is
+      // why the original single-model commands were just trailing
+      // "--model ..." args) to launch BOTH vLLM servers as sibling
+      // background processes sharing this one container — see this
+      // section's own top comment for why that's the only way to actually
+      // share one physical GPU under ECS's placement model. `wait -n`
+      // exits (and lets ECS restart the whole task) the moment either
+      // process dies, rather than silently limping along on just one
+      // model — real deploy verification found this needs bash, not sh:
+      // the image's /bin/sh is a POSIX-minimal shell that rejects `-n` as
+      // an illegal option ("sh: 1: wait: Illegal option -n"), immediately
+      // exiting 2 and crash-looping the task. bash is present on this
+      // CUDA/Ubuntu-based image and supports the flag.
       image: ecs.ContainerImage.fromRegistry("vllm/vllm-openai:latest"),
+      entryPoint: ["bash", "-c"],
       gpuCount: 1,
-      // g6.xlarge has 16GB RAM — leave real headroom for the host OS/ECS
-      // agent rather than reserving all of it for the container.
+      // g6.xlarge has 16GB system RAM (distinct from the L4's own ~22GiB
+      // VRAM, which is what --gpu-memory-utilization below governs) —
+      // leave real headroom for the host OS/ECS agent rather than
+      // reserving all of it. Genuinely untested at time of writing
+      // whether two co-resident vLLM processes' real system-RAM footprint
+      // fits comfortably here: the smaller 4B models need far less than
+      // the original single 8B model's own 14000MiB reservation, but
+      // running two processes instead of one is the open question — watch
+      // this in staging; g6.2xlarge (same GPU, more system RAM/vCPU) is a
+      // one-line fix if it's tight.
       memoryReservationMiB: 14000,
-      // Real deploy verification hit a genuine startup crash here: the
-      // model's native 40960-token context window needs 5.62 GiB of KV
-      // cache, but the L4's 22GB VRAM only has 3.3 GiB left after loading
-      // the 14.11 GiB of bf16 weights (RuntimeError: "Engine core
-      // initialization failed" / ValueError citing the exact shortfall).
-      // Our chunks (chunking.ts) top out around 1200 chars (~a few hundred
-      // tokens), nowhere near 40960, so capping max-model-len is a correct
-      // fit for this workload, not a workaround — leaves headroom for
-      // concurrent requests too.
-      // A second real startup finding: a live embedding call returned a
-      // real 400 from vLLM — "Model 'Qwen/Qwen3-Embedding-8B' does not
-      // support Matryoshka embeddings; dimensions must be unset" — because
-      // Qwen3-Embedding-8B's published config.json doesn't declare
-      // Matryoshka support even though the model itself was trained with
-      // MRL. --hf-overrides opts vLLM into honoring our embeddingClient.ts
-      // `dimensions: 1024` request param (confirmed against vLLM's own
-      // docs/issue tracker, not guessed).
+      // Two real deploy attempts failed here before this one worked out
+      // why. Attempt 1 (Qwen3-Embedding-4B + Qwen3-4B, launched
+      // concurrently): both loaded at an *identical* 7.56 GiB of weights
+      // (same underlying 4B dense architecture — the embedding variant
+      // isn't meaningfully smaller than the generation model), so combined
+      // weights alone (~15.1GiB) already ate most of the card before
+      // either could allocate KV cache. Attempt 2 (switched to the much
+      // smaller Qwen3-Embedding-0.6B, ~1.2GiB weights, still launched
+      // concurrently): failed anyway — the *smaller* model's engine
+      // reported "Available KV cache memory: -4.86 GiB" despite its own
+      // usage being only ~1.4GiB against a 0.25-fraction (~5.5GiB) budget,
+      // proving the real bug wasn't model size, it was concurrency: each
+      // vLLM process profiles *actual current free VRAM* at startup
+      // (not a private slice reserved just for it), so launching both
+      // engines at once means each one's memory profiling step races
+      // against the other's concurrent weight loading — whichever
+      // profiles second sees a card that's already been eaten into by
+      // its sibling, regardless of what its own --gpu-memory-utilization
+      // fraction was budgeted for. There's no flag that reserves a private
+      // VRAM slice per process; the two have to simply not start at the
+      // same time. Fix: sequence the startup — launch the smaller
+      // embedding server, block until its /health endpoint responds
+      // (i.e. its engine has fully initialized, including KV cache
+      // allocation, so its VRAM footprint is final and small), and only
+      // then launch generation, which now profiles a card with just
+      // embedding's already-settled ~1.4GiB on it instead of a second
+      // engine's still-growing footprint. Polls via python3 (guaranteed
+      // present on this image) rather than curl (not guaranteed). Once
+      // sequenced, the original generous fractions are safe again —
+      // 0.3/0.6 leaves real headroom on both sides now that there's no
+      // race to lose. max-model-len values unchanged — chunks
+      // (chunking.ts) top out around 1200 chars, nowhere near either cap.
       command: [
-        "--model",
-        "Qwen/Qwen3-Embedding-8B",
-        "--dtype",
-        "auto",
-        "--max-model-len",
-        "4096",
-        "--hf-overrides",
-        '{"is_matryoshka": true, "matryoshka_dimensions": [1024]}',
+        "vllm serve Qwen/Qwen3-Embedding-0.6B --port 8000 --dtype auto --max-model-len 4096 " +
+          '--gpu-memory-utilization 0.3 --hf-overrides \'{"is_matryoshka": true, "matryoshka_dimensions": [1024]}\' & ' +
+          "until python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)\" 2>/dev/null; do sleep 5; done && " +
+          "vllm serve Qwen/Qwen3-4B --port 8001 --dtype auto --max-model-len 8192 --gpu-memory-utilization 0.6 & " +
+          "wait -n",
       ],
-      portMappings: [{ containerPort: 8000 }],
-      logging: ecs.LogDrivers.awsLogs({ streamPrefix: "edd-workbench-embedding" }),
+      portMappings: [{ containerPort: 8000 }, { containerPort: 8001 }],
+      logging: ecs.LogDrivers.awsLogs({ streamPrefix: "edd-workbench-gpu" }),
     });
-    const embeddingService = new ecs.Ec2Service(this, "EmbeddingService", {
+    const gpuService = new ecs.Ec2Service(this, "GpuService", {
       cluster,
-      serviceName: "embedding",
-      taskDefinition: embeddingTaskDefinition,
+      serviceName: "gpu",
+      taskDefinition: gpuTaskDefinition,
       // Starts at 0 — only ever changed by the EventBridge Scheduler rules
       // below, never by a deploy. A real deploy (a new image/task revision)
       // while this happens to be scheduled off simply updates the service
       // definition without starting any tasks, exactly as intended.
       desiredCount: 0,
-      capacityProviderStrategies: [{ capacityProvider: embeddingCapacityProvider.capacityProviderName, weight: 1 }],
-      securityGroups: [embeddingSecurityGroup],
+      capacityProviderStrategies: [{ capacityProvider: gpuCapacityProvider.capacityProviderName, weight: 1 }],
+      securityGroups: [gpuSecurityGroup],
       cloudMapOptions: {
         cloudMapNamespace: internalNamespace,
-        name: "embedding",
+        name: "gpu",
         dnsRecordType: servicediscovery.DnsRecordType.A,
       },
       circuitBreaker: { rollback: true },
       minHealthyPercent: 0, // single-instance service that spends most of its life at desiredCount 0 — 100% would block any deploy
     });
 
-    // Two schedule-triggered flips of desiredCount — see this section's own
-    // top comment for why this (not a Kubernetes-specific scaler) is the
-    // ECS-native "warm on a schedule" mechanism. Universal targets invoke
-    // an AWS API action directly with no Lambda in between; the {{service}}
-    // segment of the ARN is the AWS SDK service identifier (lowercase
-    // "ecs"), but the request body fields are PascalCase (Cluster/Service/
-    // DesiredCount) — a real CREATE_FAILED ("missing field(s): Service")
-    // proved the lowercase camelCase guess wrong; confirmed PascalCase via
-    // real-world universal-target examples before fixing this.
-    const embeddingSchedulerRole = new iam.Role(this, "EmbeddingSchedulerRole", {
+    // One schedule pair, not two — both models always started/stopped
+    // together anyway even when split across two services (identical
+    // 9am-18:00 UK window), so a single desiredCount flip now covers both.
+    // Universal targets invoke an AWS API action directly with no Lambda
+    // in between; the {{service}} segment of the ARN is the AWS SDK
+    // service identifier (lowercase "ecs"), but the request body fields
+    // are PascalCase (Cluster/Service/DesiredCount) — a real CREATE_FAILED
+    // ("missing field(s): Service") proved the lowercase camelCase guess
+    // wrong; confirmed PascalCase via real-world universal-target examples
+    // before fixing this.
+    const gpuSchedulerRole = new iam.Role(this, "GpuSchedulerRole", {
       assumedBy: new iam.ServicePrincipal("scheduler.amazonaws.com"),
     });
-    embeddingSchedulerRole.addToPolicy(
-      new iam.PolicyStatement({ actions: ["ecs:UpdateService"], resources: [embeddingService.serviceArn] }),
+    gpuSchedulerRole.addToPolicy(
+      new iam.PolicyStatement({ actions: ["ecs:UpdateService"], resources: [gpuService.serviceArn] }),
     );
 
     // Business hours only, UK time — ScheduleExpressionTimezone handles
     // the BST/GMT clock change automatically, unlike a fixed UTC cron
-    // would. Narrowed from 7am-7pm to 9am-6pm (2026-09-04) once real usage
+    // would. 9am-6pm, narrowed from 7am-7pm (2026-09-04) once real usage
     // data confirmed actual usage sits inside that window — every hour
     // trimmed is real, direct savings at g6.xlarge's on-demand rate.
-    new scheduler.CfnSchedule(this, "EmbeddingScheduleStart", {
+    new scheduler.CfnSchedule(this, "GpuScheduleStart", {
       scheduleExpression: "cron(0 9 ? * MON-FRI *)",
       scheduleExpressionTimezone: "Europe/London",
       flexibleTimeWindow: { mode: "OFF" },
       target: {
         arn: "arn:aws:scheduler:::aws-sdk:ecs:updateService",
-        roleArn: embeddingSchedulerRole.roleArn,
-        input: JSON.stringify({ Cluster: cluster.clusterName, Service: embeddingService.serviceName, DesiredCount: 1 }),
+        roleArn: gpuSchedulerRole.roleArn,
+        input: JSON.stringify({ Cluster: cluster.clusterName, Service: gpuService.serviceName, DesiredCount: 1 }),
       },
     });
-    new scheduler.CfnSchedule(this, "EmbeddingScheduleStop", {
+    new scheduler.CfnSchedule(this, "GpuScheduleStop", {
       scheduleExpression: "cron(0 18 ? * MON-FRI *)",
       scheduleExpressionTimezone: "Europe/London",
       flexibleTimeWindow: { mode: "OFF" },
       target: {
         arn: "arn:aws:scheduler:::aws-sdk:ecs:updateService",
-        roleArn: embeddingSchedulerRole.roleArn,
-        input: JSON.stringify({ Cluster: cluster.clusterName, Service: embeddingService.serviceName, DesiredCount: 0 }),
-      },
-    });
-
-    // --- Generation service (RAG "Ask" answer generation) ----------------
-    // Second, dedicated GPU instance for text generation — the embedding
-    // GPU above has no VRAM headroom to co-locate a chat-completion model
-    // alongside Qwen3-Embedding-8B. Mirrors the embedding service's own
-    // proven pattern line-for-line: EC2 capacity provider, warm-on-schedule
-    // via EventBridge, Cloud Map internal DNS, same business-hours window
-    // (so "Ask" and embedding come up/down together).
-    const generationInstanceSecurityGroup = new ec2.SecurityGroup(this, "GenerationInstanceSecurityGroup", {
-      vpc,
-      description: "EDD Workbench generation GPU instance - outbound only (pulls vLLM image and model weights)",
-      allowAllOutbound: true,
-    });
-    const generationInstanceRole = new iam.Role(this, "GenerationInstanceRole", {
-      assumedBy: new iam.ServicePrincipal("ec2.amazonaws.com"),
-      managedPolicies: [
-        iam.ManagedPolicy.fromAwsManagedPolicyName("service-role/AmazonEC2ContainerServiceforEC2Role"),
-      ],
-    });
-    const generationLaunchTemplate = new ec2.LaunchTemplate(this, "GenerationLaunchTemplate", {
-      instanceType: ec2.InstanceType.of(ec2.InstanceClass.G6, ec2.InstanceSize.XLARGE),
-      machineImage: ecs.EcsOptimizedImage.amazonLinux2(ecs.AmiHardwareType.GPU),
-      securityGroup: generationInstanceSecurityGroup,
-      role: generationInstanceRole,
-      userData: ec2.UserData.forLinux(),
-      blockDevices: [{ deviceName: "/dev/xvda", volume: autoscaling.BlockDeviceVolume.ebs(100) }],
-      // Spot, not on-demand — see embeddingLaunchTemplate's own comment for
-      // the full reasoning (schedule-gated, minCapacity 0, existing
-      // GPU_UNAVAILABLE_MESSAGE fallback already covers an interruption the
-      // same way it covers outside-business-hours). No maxPrice: defaults
-      // to the on-demand rate as a ceiling.
-      spotOptions: { requestType: ec2.SpotRequestType.ONE_TIME },
-    });
-    const generationAsg = new autoscaling.AutoScalingGroup(this, "GenerationAsg", {
-      vpc,
-      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
-      launchTemplate: generationLaunchTemplate,
-      minCapacity: 0,
-      maxCapacity: 1,
-    });
-    const generationCapacityProvider = new ecs.AsgCapacityProvider(this, "GenerationCapacityProvider", {
-      autoScalingGroup: generationAsg,
-      enableManagedScaling: true,
-      targetCapacityPercent: 100,
-      enableManagedTerminationProtection: false,
-    });
-    cluster.addAsgCapacityProvider(generationCapacityProvider);
-
-    const generationSecurityGroup = new ec2.SecurityGroup(this, "GenerationServiceSecurityGroup", {
-      vpc,
-      description: "EDD Workbench generation service (vLLM) - inbound from the api only",
-      allowAllOutbound: true,
-    });
-    generationSecurityGroup.addIngressRule(
-      apiService.service.connections.securityGroups[0],
-      ec2.Port.tcp(8000),
-      "Api service to generation service (vLLM OpenAI-compatible API)",
-    );
-
-    const generationTaskDefinition = new ecs.Ec2TaskDefinition(this, "GenerationTaskDefinition", {
-      networkMode: ecs.NetworkMode.AWS_VPC,
-    });
-    generationTaskDefinition.addContainer("generation", {
-      image: ecs.ContainerImage.fromRegistry("vllm/vllm-openai:latest"),
-      gpuCount: 1,
-      memoryReservationMiB: 14000,
-      // Qwen3-8B per the RAG architecture doc's own recommendation.
-      // max-model-len capped at 8192 (vs. embedding's 4096) — generation
-      // prompts carry several retrieved chunks plus the question, not a
-      // single short string, so this needs more headroom; sized the same
-      // empirical way as the embedding service's own cap (real deploy
-      // verification, not guessed up front).
-      command: ["--model", "Qwen/Qwen3-8B", "--dtype", "auto", "--max-model-len", "8192"],
-      portMappings: [{ containerPort: 8000 }],
-      logging: ecs.LogDrivers.awsLogs({ streamPrefix: "edd-workbench-generation" }),
-    });
-    const generationService = new ecs.Ec2Service(this, "GenerationService", {
-      cluster,
-      serviceName: "generation",
-      taskDefinition: generationTaskDefinition,
-      desiredCount: 0,
-      capacityProviderStrategies: [{ capacityProvider: generationCapacityProvider.capacityProviderName, weight: 1 }],
-      securityGroups: [generationSecurityGroup],
-      cloudMapOptions: {
-        cloudMapNamespace: internalNamespace,
-        name: "generation",
-        dnsRecordType: servicediscovery.DnsRecordType.A,
-      },
-      circuitBreaker: { rollback: true },
-      minHealthyPercent: 0,
-    });
-
-    const generationSchedulerRole = new iam.Role(this, "GenerationSchedulerRole", {
-      assumedBy: new iam.ServicePrincipal("scheduler.amazonaws.com"),
-    });
-    generationSchedulerRole.addToPolicy(
-      new iam.PolicyStatement({ actions: ["ecs:UpdateService"], resources: [generationService.serviceArn] }),
-    );
-
-    new scheduler.CfnSchedule(this, "GenerationScheduleStart", {
-      scheduleExpression: "cron(0 9 ? * MON-FRI *)",
-      scheduleExpressionTimezone: "Europe/London",
-      flexibleTimeWindow: { mode: "OFF" },
-      target: {
-        arn: "arn:aws:scheduler:::aws-sdk:ecs:updateService",
-        roleArn: generationSchedulerRole.roleArn,
-        input: JSON.stringify({ Cluster: cluster.clusterName, Service: generationService.serviceName, DesiredCount: 1 }),
-      },
-    });
-    new scheduler.CfnSchedule(this, "GenerationScheduleStop", {
-      scheduleExpression: "cron(0 18 ? * MON-FRI *)",
-      scheduleExpressionTimezone: "Europe/London",
-      flexibleTimeWindow: { mode: "OFF" },
-      target: {
-        arn: "arn:aws:scheduler:::aws-sdk:ecs:updateService",
-        roleArn: generationSchedulerRole.roleArn,
-        input: JSON.stringify({ Cluster: cluster.clusterName, Service: generationService.serviceName, DesiredCount: 0 }),
+        roleArn: gpuSchedulerRole.roleArn,
+        input: JSON.stringify({ Cluster: cluster.clusterName, Service: gpuService.serviceName, DesiredCount: 0 }),
       },
     });
 
     // --- Search service (self-hosted Elasticsearch, full-text document
     // search) --------------------------------------------------------------
-    // EC2-backed like Embedding/GenerationService above, but two deliberate
-    // differences: no GPU — a general-purpose instance is all a search
-    // index needs — and always on, no EventBridge schedule. Unlike the
-    // GPU-backed services (scheduled off specifically because GPU-hours are
-    // expensive), there's no comparable cost pressure for a small
-    // general-purpose box, and search needs to be available whenever the
-    // app is used, not just 7am-19:00 UK time.
+    // EC2-backed like GpuService above, but two deliberate differences: no
+    // GPU — a general-purpose instance is all a search index needs — and
+    // always on, no EventBridge schedule. Unlike the GPU-backed service
+    // (scheduled off specifically because GPU-hours are expensive), there's
+    // no comparable cost pressure for a small general-purpose box, and
+    // search needs to be available whenever the app is used, not just
+    // 9am-18:00 UK time.
     //
     // Durability: the Elasticsearch data path lives on this launch
     // template's own EBS volume, which is NOT a stable/reattachable volume
@@ -950,9 +884,9 @@ export class EddWorkbenchStack extends cdk.Stack {
       vpc,
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
       launchTemplate: searchLaunchTemplate,
-      // Always exactly 1 — no schedule flips this the way Embedding/
-      // GenerationService's own ASGs get flipped 0/1 on a business-hours
-      // cron; see this section's own top comment for why.
+      // Always exactly 1 — no schedule flips this the way GpuService's own
+      // ASG gets flipped 0/1 on a business-hours cron; see this section's
+      // own top comment for why.
       minCapacity: 1,
       maxCapacity: 1,
     });

@@ -36,7 +36,7 @@ describe("embedTexts", () => {
       expect.objectContaining({ method: "POST" }),
     );
     const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
-    expect(body).toEqual({ model: "Qwen/Qwen3-Embedding-8B", input: ["first", "second"], dimensions: 1024 });
+    expect(body).toEqual({ model: "Qwen/Qwen3-Embedding-0.6B", input: ["first", "second"], dimensions: 1024 });
   });
 
   it("defaults totalTokens to 0 if the response omits usage", async () => {

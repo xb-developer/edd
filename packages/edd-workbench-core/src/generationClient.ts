@@ -1,10 +1,14 @@
-// Self-hosted Qwen3-8B served by vLLM (see
-// infra/edd-workbench/lib/edd-workbench-stack.ts's GenerationService) —
-// only warm during the same scheduled business hours as the embedding
-// service, so a call made outside that window will fail/time out; the
-// caller (ask.ts) is responsible for turning that into a clear "try again
-// during business hours" response, not this client.
-const GENERATION_MODEL = process.env.GENERATION_MODEL ?? "Qwen/Qwen3-8B";
+// Self-hosted Qwen3-4B served by vLLM, co-located with the embedding model
+// on one instance (see infra/edd-workbench/lib/edd-workbench-stack.ts's
+// GpuService) — only warm during the same scheduled business hours as the
+// embedding model, so a call made outside that window (or during any other
+// GPU-service failure) will fail/time out; the caller (ask.ts) turns that
+// into a generic "temporarily unavailable" response, not this client.
+// Switched down from Qwen3-8B on 2026-09-08 specifically to fit alongside
+// the embedding model on a single GPU — see ai-model-decision.md's
+// "Investigation: smaller models" section for the quality tradeoff this
+// accepts (not yet validated against real documents).
+const GENERATION_MODEL = process.env.GENERATION_MODEL ?? "Qwen/Qwen3-4B";
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant";

@@ -1,13 +1,27 @@
-// Self-hosted Qwen3-Embedding-8B served by vLLM (see
-// infra/edd-workbench/lib/edd-workbench-stack.ts's EmbeddingService) —
-// only warm during scheduled business hours, so calls made outside that
-// window will fail/time out until the next scheduled start; the embedding
-// queue handler's own retry (via SQS's normal redelivery/DLQ) is what
-// absorbs that, not this client.
-const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL ?? "Qwen/Qwen3-Embedding-8B";
+// Self-hosted Qwen3-Embedding-0.6B served by vLLM, co-located with the
+// generation model on one instance (see
+// infra/edd-workbench/lib/edd-workbench-stack.ts's GpuService) — only warm
+// during scheduled business hours, so calls made outside that window will
+// fail/time out until the next scheduled start; the embedding queue
+// handler's own retry (via SQS's normal redelivery/DLQ) is what absorbs
+// that, not this client. Switched down from Qwen3-Embedding-8B on
+// 2026-09-08 to fit alongside the generation model on a single GPU —
+// first tried Qwen3-Embedding-4B, which a real deploy proved doesn't
+// actually save VRAM over the 8B (same 4B dense architecture as the
+// generation model, ~7.56GiB either way); 0.6B (~1.2GiB) is what actually
+// fits. See ai-model-decision.md's "Investigation: smaller models" section
+// for the quality tradeoff this accepts (not yet validated against real
+// documents).
+const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL ?? "Qwen/Qwen3-Embedding-0.6B";
 // 1024 — must match document_chunks.embedding's vector(1024) column (see
-// migration 026); Qwen3-Embedding-8B supports Matryoshka-style truncated
-// output via this same `dimensions` request parameter.
+// migration 026). Qwen3-Embedding-0.6B's native output is already 1024
+// dims (unlike the 4B/8B siblings, which need Matryoshka truncation from
+// a larger native size) — this `dimensions` param is only still sent
+// because vLLM's own Qwen3-Embedding support requires an explicit
+// `--hf-overrides` Matryoshka opt-in server-side regardless of model
+// size (its config.json doesn't declare Matryoshka support even though
+// the whole family was trained with MRL) — see the CDK stack's own
+// comment on the vLLM command for the exact flag.
 const EMBEDDING_DIMENSIONS = 1024;
 
 interface EmbeddingApiResponse {

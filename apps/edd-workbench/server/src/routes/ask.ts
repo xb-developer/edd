@@ -47,11 +47,11 @@ askRouter.post("/", async (req: Request<{ matterId: string }>, res, next) => {
       return;
     }
 
-    // Embedding and generation only ever run Mon-Fri 7am-19:00 UK (see
-    // GenerationService/EmbeddingService's own EventBridge schedules) —
-    // unlike the async ingest->embedding queue hand-off, which tolerates a
-    // cold/off GPU via SQS retry, this is a synchronous HTTP request with
-    // no equivalent safety net, so a failure here gets a clear, specific
+    // Embedding and generation only ever run Mon-Fri 9am-18:00 UK (see
+    // GpuService's own EventBridge schedules) — unlike the async
+    // ingest->embedding queue hand-off, which tolerates a cold/off GPU via
+    // SQS retry, this is a synchronous HTTP request with no equivalent
+    // safety net, so a failure here gets a clear, specific
     // message rather than a generic 500.
     let questionEmbedding: number[];
     try {

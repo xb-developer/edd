@@ -69,4 +69,16 @@ describe("searchRouter", () => {
     expect(response.status).toBe(503);
     expect(response.body.error).toMatch(/temporarily unavailable/i);
   });
+
+  it("400s with an actionable message on a malformed boolean expression, not the generic 503", async () => {
+    process.env.ELASTICSEARCH_SERVICE_URL = "http://search.internal:9200";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 400, text: async () => "Failed to parse query" }));
+
+    const matterId = randomUUID();
+    const app = buildTestApp({ orgId: `org_${randomUUID()}`, userId: `auth0|${randomUUID()}`, role: "reviewer", email: "t@example.com" });
+    const response = await request(app).get(`/api/matters/${matterId}/search`).query({ q: "invoice AND (" });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toMatch(/syntax error/i);
+  });
 });

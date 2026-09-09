@@ -82,14 +82,25 @@ export interface SearchResult {
  * org/matter pair with real documents in it — a term query needs the
  * `.keyword` sub-field for this to ever match anything.
  *
- * simple_query_string (not the stricter query_string) never throws on
- * malformed input — it does best-effort parsing of +/-/|/"phrase"/*
- * syntax, which is the boolean/phrase-exact behavior asked for without any
- * custom query-language parsing of our own. default_operator: OR (not AND)
- * — for an eDiscovery tool, silently ANDing bare words together risks
- * under-recall (missing a responsive document), a worse failure than
- * over-recall; a reviewer typing several bare words expects "any of these,"
- * narrowing explicitly with +word/"phrase" syntax when they want it.
+ * query_string (not simple_query_string, which this used before boolean
+ * search was added) is Elasticsearch's stricter Lucene-syntax query parser
+ * — it natively understands AND/OR/NOT keywords and parenthesised grouping
+ * ("(a OR b) AND NOT c") on top of everything simple_query_string already
+ * supported here (+required/-excluded/"exact phrase"/* wildcard), so no
+ * custom boolean-expression parser of our own is needed. The real tradeoff
+ * for switching: simple_query_string never throws on malformed input (it
+ * does best-effort recovery), but query_string does — a genuinely
+ * malformed expression (unmatched parenthesis, a trailing operator) is a
+ * real 400 from Elasticsearch. See SearchSyntaxError below for how that's
+ * surfaced as a specific, catchable error rather than folded into the same
+ * "search is down" 503 every other failure here produces.
+ *
+ * default_operator: OR (not AND) — for an eDiscovery tool, silently ANDing
+ * bare words together risks under-recall (missing a responsive document),
+ * a worse failure than over-recall; a reviewer typing several bare words
+ * expects "any of these," narrowing explicitly with AND/+word/"phrase"
+ * syntax when they want it. Unaffected by the query_string switch — this
+ * setting means the same thing in both query types.
  *
  * track_total_hits + returning totalHits alongside the (possibly
  * size-capped) documentIds lets the caller tell "these are all the matches"
@@ -104,7 +115,7 @@ export async function searchDocuments(orgId: string, matterId: string, query: st
       query: {
         bool: {
           filter: [{ term: { "org_id.keyword": orgId } }, { term: { "matter_id.keyword": matterId } }],
-          must: [{ simple_query_string: { query, fields: ["body", "filename"], default_operator: "OR" } }],
+          must: [{ query_string: { query, fields: ["body", "filename"], default_operator: "OR" } }],
         },
       },
       track_total_hits: true,
@@ -114,12 +125,28 @@ export async function searchDocuments(orgId: string, matterId: string, query: st
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
+    // 400 here means Elasticsearch's Lucene query parser rejected the
+    // syntax itself (mismatched parens, a dangling AND/OR, etc) — a real,
+    // user-actionable mistake in what they typed, not a "search is down"
+    // failure. Distinguished so the route can tell the two apart and
+    // respond with something the user can actually act on, instead of the
+    // generic "temporarily unavailable" message every other failure here
+    // gets. Not forwarding Elasticsearch's own (Lucene-internal, fairly
+    // technical) error text — SearchSyntaxError's message is deliberately
+    // generic, same reasoning as this app's centralized error handler
+    // never leaking raw error bodies to the client.
+    if (res.status === 400) {
+      throw new SearchSyntaxError("Search syntax error — check your parentheses and AND/OR/NOT operators.");
+    }
     throw new Error(`Search request failed: ${res.status} ${body}`);
   }
 
   const { hits } = (await res.json()) as { hits: { total: { value: number }; hits: { _id: string }[] } };
   return { documentIds: hits.hits.map((h) => h._id), totalHits: hits.total.value };
 }
+
+/** Thrown by searchDocuments specifically for a malformed query (see its own comment) — distinct from every other failure mode, which stays a plain Error, so callers can tell "the user's query syntax is invalid" from "search is unavailable" and respond to each differently. */
+export class SearchSyntaxError extends Error {}
 
 /** Live document count in the index for one org — the basis for the admin-visible health check (compares this against that org's own Postgres ready/failed document count). Scoped, not a whole-index total, since an admin cares about their own org's data being fully indexed, not some other org's. Filters on `org_id.keyword` — see searchDocuments's own comment for why the bare (dynamically-mapped, analyzed) field name would never match. */
 export async function getIndexHealth(orgId: string): Promise<{ docCount: number }> {

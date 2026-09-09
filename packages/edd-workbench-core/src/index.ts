@@ -26,6 +26,7 @@ export {
   deleteDocumentFromIndex,
   searchDocuments,
   getIndexHealth,
+  SearchSyntaxError,
   type SearchDocument,
   type SearchResult,
 } from "./searchClient.js";

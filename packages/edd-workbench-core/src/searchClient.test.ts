@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { indexDocument, deleteDocumentFromIndex, searchDocuments, getIndexHealth } from "./searchClient.js";
+import { indexDocument, deleteDocumentFromIndex, searchDocuments, getIndexHealth, SearchSyntaxError } from "./searchClient.js";
 
 const DOC = {
   documentId: "doc-1",
@@ -65,7 +65,7 @@ describe("searchClient", () => {
     await expect(deleteDocumentFromIndex("doc-1")).rejects.toThrow("unavailable");
   });
 
-  it("searchDocuments filters by org_id and matter_id, uses simple_query_string with default_operator OR, and returns documentIds plus totalHits", async () => {
+  it("searchDocuments filters by org_id and matter_id, uses query_string with default_operator OR, and returns documentIds plus totalHits", async () => {
     process.env.ELASTICSEARCH_SERVICE_URL = "http://es.internal:9200";
     const fetchSpy = vi.fn().mockResolvedValue({
       ok: true,
@@ -81,7 +81,7 @@ describe("searchClient", () => {
       { term: { "org_id.keyword": "org-1" } },
       { term: { "matter_id.keyword": "matter-1" } },
     ]);
-    expect(body.query.bool.must[0].simple_query_string).toEqual({
+    expect(body.query.bool.must[0].query_string).toEqual({
       query: "invoice payment",
       fields: ["body", "filename"],
       default_operator: "OR",
@@ -94,6 +94,16 @@ describe("searchClient", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 503, text: async () => "index not ready" }));
 
     await expect(searchDocuments("org-1", "matter-1", "x")).rejects.toThrow("index not ready");
+  });
+
+  it("searchDocuments throws a SearchSyntaxError (not the generic Error) on a 400 — a malformed boolean expression, not an outage", async () => {
+    process.env.ELASTICSEARCH_SERVICE_URL = "http://es.internal:9200";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: false, status: 400, text: async () => "Failed to parse query" }),
+    );
+
+    await expect(searchDocuments("org-1", "matter-1", "a AND (b")).rejects.toThrow(SearchSyntaxError);
   });
 
   it("getIndexHealth returns one org's document count, filtered by org_id", async () => {
@@ -157,6 +167,59 @@ describe("searchClient (real Elasticsearch)", () => {
       expect(otherMatter.documentIds).toEqual([]);
     } finally {
       await deleteDocumentFromIndex(documentId);
+    }
+  });
+
+  // Two documents, one org/matter, distinguished by a unique word each —
+  // real AND/OR/NOT/grouping behavior against a real cluster, not just
+  // "the request shape looks right" (the mocked suite already covers that).
+  it("supports AND/OR/NOT and parenthesised grouping against real Elasticsearch", async () => {
+    const orgId = `org_${randomUUID().replace(/-/g, "")}`;
+    const matterId = randomUUID();
+    const docA = randomUUID();
+    const docB = randomUUID();
+
+    await indexDocument({
+      documentId: docA,
+      orgId,
+      matterId,
+      filename: "bool-a.pdf",
+      extension: "pdf",
+      guid: "000001",
+      body: "zzqxvalpha zzqxvshared",
+    });
+    await indexDocument({
+      documentId: docB,
+      orgId,
+      matterId,
+      filename: "bool-b.pdf",
+      extension: "pdf",
+      guid: "000002",
+      body: "zzqxvbeta zzqxvshared",
+    });
+    try {
+      await fetch(`${process.env.ELASTICSEARCH_SERVICE_URL}/edd-workbench-documents/_refresh`, { method: "POST" });
+
+      // AND — only the doc with both terms.
+      expect((await searchDocuments(orgId, matterId, "zzqxvalpha AND zzqxvshared")).documentIds).toEqual([docA]);
+      // OR — either term, both docs (order not asserted).
+      expect(new Set((await searchDocuments(orgId, matterId, "zzqxvalpha OR zzqxvbeta")).documentIds)).toEqual(
+        new Set([docA, docB]),
+      );
+      // NOT — the shared term minus the one that also has "alpha".
+      expect((await searchDocuments(orgId, matterId, "zzqxvshared AND NOT zzqxvalpha")).documentIds).toEqual([docB]);
+      // Parenthesised grouping — (alpha OR beta) AND shared matches both;
+      // proves precedence/grouping actually reaches Elasticsearch's parser,
+      // not just bare AND/OR individually.
+      expect(new Set((await searchDocuments(orgId, matterId, "(zzqxvalpha OR zzqxvbeta) AND zzqxvshared")).documentIds)).toEqual(
+        new Set([docA, docB]),
+      );
+      // A genuinely malformed expression throws SearchSyntaxError, not a
+      // silent empty result or a generic 5xx-shaped Error.
+      await expect(searchDocuments(orgId, matterId, "zzqxvalpha AND (")).rejects.toThrow(SearchSyntaxError);
+    } finally {
+      await deleteDocumentFromIndex(docA);
+      await deleteDocumentFromIndex(docB);
     }
   });
 });

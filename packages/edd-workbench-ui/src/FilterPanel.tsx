@@ -200,8 +200,8 @@ export function FilterPanel({
         <h2 className="panel-title">Search</h2>
         <input
           className="search-box"
-          placeholder='Search documents… ("exact phrase", +required, -excluded)'
-          title='Search documents… ("exact phrase", +required, -excluded)'
+          placeholder='Search documents… (AND, OR, NOT, "phrase", (grouping))'
+          title='Search documents… AND / OR / NOT, ( ) for grouping, "exact phrase", +required, -excluded, * wildcard'
           value={searchQuery}
           onChange={(e) => onSearchQueryChange(e.target.value)}
         />

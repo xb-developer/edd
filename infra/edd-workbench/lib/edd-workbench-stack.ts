@@ -141,7 +141,21 @@ export class EddWorkbenchStack extends cdk.Stack {
       engine: rds.DatabaseInstanceEngine.postgres({ version: rds.PostgresEngineVersion.VER_16 }),
       vpc,
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
-      multiAz: true,
+      // Single-AZ, deliberately — the live instance has actually been
+      // single-AZ since it was created (2026-09-01): RDS accepted the
+      // Multi-AZ conversion request but then hit "Insufficient instance
+      // capacity for instance type db.t4g.medium in availability zone
+      // eu-west-2a" ~23 minutes later and silently left it single-AZ
+      // instead (see the instance's own RDS event log, not a guess) — the
+      // CreateDBInstance call itself succeeded, so CloudFormation never saw
+      // a failure and kept recording MultiAZ:true, a real drift confirmed
+      // via `aws cloudformation detect-stack-resource-drift` (still
+      // present as of 2026-09-09, unrelated to that week's other infra
+      // work). Accepted here rather than retried: this is staging, not
+      // production, and the standby doubles the instance-hour cost
+      // (~$53/mo more) for automatic failover this environment doesn't
+      // need.
+      multiAz: false,
       allocatedStorage: 50,
       // Must be true at creation — cannot be toggled on later without a
       // snapshot-restore event (build plan §9).

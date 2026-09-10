@@ -1,12 +1,10 @@
 # NOTICE
 
-Collate (EDD Workbench)
+Collate
 Copyright © 2026 XBundle Ltd. All rights reserved.
 
 This notice covers original code written for Collate together with the
-third-party open-source software it incorporates. It does not cover the
-Assemble product or the proof-of-concept prototype, which live elsewhere in
-this monorepo and are outside Collate's own scope.
+third-party open-source software it incorporates.
 
 ## Third-party software
 

@@ -4,6 +4,7 @@ import type { MatterDTO } from "./types";
 import { MatterDetail } from "./MatterDetail";
 import { closeViewerWindowForMatter } from "./viewer-window/useViewerWindow";
 import { WorkerHealthBar } from "./WorkerHealthBar";
+import { NoticeDialog } from "./NoticeDialog";
 
 export interface EddWorkbenchWorkspaceProps {
   /** Defaults to the standalone app's own local server. A future host embedding this component elsewhere can point it at a different origin. */
@@ -37,6 +38,7 @@ export function EddWorkbenchWorkspace({ apiBaseUrl = "http://localhost:4430/api"
   const [deletingMatter, setDeletingMatter] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState("");
+  const [showNotices, setShowNotices] = useState(false);
   // Guards against a commit firing twice (e.g. Enter's own blur plus a
   // real blur landing close together) and against Escape's cancellation
   // being immediately followed by a stray blur-on-unmount commit.
@@ -206,6 +208,9 @@ export function EddWorkbenchWorkspace({ apiBaseUrl = "http://localhost:4430/api"
           <div className="brand">
             <span className="mark">Co</span>
           </div>
+          <button type="button" className="topbar-btn" onClick={() => setShowNotices(true)}>
+            Notices
+          </button>
           {onLogout && (
             <button type="button" className="topbar-btn" onClick={handleLogout}>
               Log out
@@ -216,6 +221,7 @@ export function EddWorkbenchWorkspace({ apiBaseUrl = "http://localhost:4430/api"
           You don't have access to any matters yet. Ask an admin to add you to one.
         </p>
         {error && <p className="bulk-note">{error}</p>}
+        {showNotices && <NoticeDialog onClose={() => setShowNotices(false)} />}
       </div>
     );
   }
@@ -230,6 +236,9 @@ export function EddWorkbenchWorkspace({ apiBaseUrl = "http://localhost:4430/api"
           <div className="brand">
             <span className="mark">Co</span>
           </div>
+          <button type="button" className="topbar-btn" onClick={() => setShowNotices(true)}>
+            Notices
+          </button>
           {onLogout && (
             <button type="button" className="topbar-btn" onClick={handleLogout}>
               Log out
@@ -238,6 +247,7 @@ export function EddWorkbenchWorkspace({ apiBaseUrl = "http://localhost:4430/api"
         </header>
         <p className="empty-note">Loading…</p>
         {error && <p className="bulk-note">{error}</p>}
+        {showNotices && <NoticeDialog onClose={() => setShowNotices(false)} />}
       </div>
     );
   }
@@ -286,6 +296,9 @@ export function EddWorkbenchWorkspace({ apiBaseUrl = "http://localhost:4430/api"
           </button>
         )}
         <WorkerHealthBar api={api} matterId={selectedMatter.id} />
+        <button type="button" className="topbar-btn" onClick={() => setShowNotices(true)}>
+          Notices
+        </button>
         {onLogout && (
           <button type="button" className="topbar-btn" onClick={handleLogout}>
             Log out
@@ -293,6 +306,7 @@ export function EddWorkbenchWorkspace({ apiBaseUrl = "http://localhost:4430/api"
         )}
       </header>
       {error && <p className="bulk-note">{error}</p>}
+      {showNotices && <NoticeDialog onClose={() => setShowNotices(false)} />}
       <main className="layout">
         <MatterDetail
           api={api}

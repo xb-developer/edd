@@ -15,4 +15,4 @@ See [`CONTEXT.md`](./CONTEXT.md) for the project's domain terminology.
 
 ## Third-party notices
 
-See [`NOTICE.md`](./NOTICE.md) for open-source software acknowledgements and copyright information.
+See [`NOTICE.md`](./client/public/NOTICE.md) for open-source software acknowledgements and copyright information — also shown in-app via the "Notices" button in the top ribbon.

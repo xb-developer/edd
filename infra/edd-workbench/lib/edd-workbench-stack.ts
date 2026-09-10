@@ -1118,11 +1118,15 @@ function handler(event) {
     // cache forever (their filename changes whenever their content does,
     // so there's nothing to go stale) — only index.html itself, the one
     // file whose content changes without its own filename changing, needs
-    // an explicit no-cache.
+    // an explicit no-cache. NOTICE.md (the in-app "Notices" dialog's
+    // content — see NoticeDialog.tsx) is the same shape of problem as
+    // index.html: a fixed, unhashed filename whose content can change
+    // without the filename changing, so it goes through the no-cache
+    // deployment below alongside index.html, not the hashed-forever one.
     new s3deploy.BucketDeployment(this, "SpaDeployment", {
       sources: [s3deploy.Source.asset("../../apps/edd-workbench/client/dist")],
       destinationBucket: spaBucket,
-      exclude: ["index.html"],
+      exclude: ["index.html", "NOTICE.md"],
       distribution,
       distributionPaths: ["/*"],
     });
@@ -1130,7 +1134,7 @@ function handler(event) {
       sources: [s3deploy.Source.asset("../../apps/edd-workbench/client/dist")],
       destinationBucket: spaBucket,
       exclude: ["*"],
-      include: ["index.html"],
+      include: ["index.html", "NOTICE.md"],
       cacheControl: [s3deploy.CacheControl.noCache(), s3deploy.CacheControl.mustRevalidate()],
       distribution,
       distributionPaths: ["/*"],

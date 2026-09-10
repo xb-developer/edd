@@ -233,6 +233,12 @@ function SortableTh({ column, sortColumn, sortDirection, onSort, resizeHandle, c
 }
 
 export function MatterDetail({ api, matterId, canManageAccess, currentUserId, matterCreatedBy }: MatterDetailProps) {
+  // Updated on every render (not via its own effect) so it's already the
+  // NEW matterId by the time any in-flight request for the OLD matterId
+  // resolves — see refreshDocuments/refreshTagState below, which compare
+  // against this to drop a stale response instead of applying it.
+  const currentMatterIdRef = useRef(matterId);
+  currentMatterIdRef.current = matterId;
   const [documents, setDocuments] = useState<DocumentDTO[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
@@ -354,7 +360,22 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
   const columnWidths = useColumnWidths(matterId);
 
   function refreshDocuments() {
-    api.getMatterDocuments(matterId).then(setDocuments).catch((err) => setError(err.message));
+    // Guards against an out-of-order response: switching matters (e.g. via
+    // Create Matter) fires a new request for the new matterId while an
+    // older, slower request for the PREVIOUS matter may still be in
+    // flight — a brand-new empty matter's query is trivially fast and can
+    // resolve before a large matter's does, so without this check the
+    // stale response lands last and silently overwrites the correct
+    // (empty) document list with the old matter's documents.
+    const requestedMatterId = matterId;
+    api
+      .getMatterDocuments(matterId)
+      .then((docs) => {
+        if (currentMatterIdRef.current === requestedMatterId) setDocuments(docs);
+      })
+      .catch((err) => {
+        if (currentMatterIdRef.current === requestedMatterId) setError(err.message);
+      });
   }
 
   useEffect(refreshDocuments, [matterId]);
@@ -391,8 +412,25 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
   }, [api, matterId, searchQuery]);
 
   function refreshTagState() {
-    api.getTagSets(matterId).then(setTagSets).catch((err) => setError(err.message));
-    api.getAllDocumentTags(matterId).then(setAppliedTagsByDocument).catch((err) => setError(err.message));
+    // Same stale-response guard as refreshDocuments above — a matter
+    // switch can leave a slower previous-matter request in flight.
+    const requestedMatterId = matterId;
+    api
+      .getTagSets(matterId)
+      .then((sets) => {
+        if (currentMatterIdRef.current === requestedMatterId) setTagSets(sets);
+      })
+      .catch((err) => {
+        if (currentMatterIdRef.current === requestedMatterId) setError(err.message);
+      });
+    api
+      .getAllDocumentTags(matterId)
+      .then((tags) => {
+        if (currentMatterIdRef.current === requestedMatterId) setAppliedTagsByDocument(tags);
+      })
+      .catch((err) => {
+        if (currentMatterIdRef.current === requestedMatterId) setError(err.message);
+      });
   }
 
   useEffect(refreshTagState, [matterId]);

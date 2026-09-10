@@ -247,10 +247,11 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
     setAskResult(result);
     setAskRelevantDocumentIds(result ? new Set(result.relevantDocuments.map((d) => d.documentId)) : null);
   }
-  // Not pruned when a search/tag filter hides a row; see the toolbar's
-  // visible/hidden count split below. Only the checkbox column
-  // (handleCheckboxClick) drives this or selects/previews the document —
-  // clicking elsewhere on the row does nothing.
+  // "Checked" (ticked/unticked) — distinct from "selected" (previewed; see
+  // selectedDocumentId). Not pruned when a search/tag filter hides a row;
+  // see the toolbar's visible/hidden count split below. Only the checkbox
+  // column (handleCheckboxClick) drives this — a plain row click
+  // selects/previews the document without checking/unchecking it.
   const [checkedDocumentIds, setCheckedDocumentIds] = useState<Set<string>>(new Set());
   // The last plain (non-shift) checkbox click that set the selection
   // anchor — what a subsequent shift-click ranges *from*. Deliberately
@@ -276,13 +277,12 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
   }
 
   // Shared shift-click range logic for checkbox clicks: everything between
-  // the anchor and the clicked row (inclusive, in
-  // current sorted/visible row order) gets added to the existing selection
-  // — anything already checked outside that range stays checked, matching
-  // the standard OS file-manager convention. Returns false (meaning: no
-  // live anchor to range from — first-ever click, or the anchor row got
-  // filtered/sorted out) so the caller can fall back to its own
-  // non-shift-click behavior instead.
+  // the anchor and the clicked row (inclusive, in current sorted/visible row
+  // order) gets checked — anything already checked outside that range stays
+  // checked, matching the standard OS file-manager convention. Returns
+  // false (meaning: no live anchor to range from — first-ever click, or the
+  // anchor row got filtered/sorted out) so the caller can fall back to its
+  // own non-shift-click behavior instead.
   function extendCheckedRange(documentId: string, visibleDocuments: DocumentDTO[]): boolean {
     if (!checkboxAnchorId) return false;
     const anchorIndex = visibleDocuments.findIndex((d) => d.documentId === checkboxAnchorId);
@@ -297,12 +297,12 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
     return true;
   }
 
-  // The checkbox column is the only thing that checks/unchecks OR
-  // selects/previews a document — clicking elsewhere on the row does
-  // neither. A plain checkbox click toggles just this one row's *checked*
-  // state (add or remove), leaving every other checked row alone. Shift
-  // range-extends from the last plain-clicked checkbox, same file-manager
-  // convention as a shift-click anywhere else.
+  // The checkbox column is the only thing that checks/unchecks a document —
+  // a plain row click (see the row's own onClick) only selects/previews it,
+  // never touches checked state. A plain checkbox click toggles just this
+  // one row's *checked* state (add or remove), leaving every other checked
+  // row alone. Shift range-extends from the last plain-clicked checkbox,
+  // same file-manager convention as a shift-click anywhere else.
   function handleCheckboxClick(documentId: string, shiftKey: boolean, visibleDocuments: DocumentDTO[]) {
     if (shiftKey && extendCheckedRange(documentId, visibleDocuments)) return;
     toggleChecked(documentId);
@@ -881,8 +881,26 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
                     {sortedDocuments.map((doc) => {
                       const appliedTagIds = appliedTagsByDocument[doc.documentId] ?? [];
                       return (
-                        <tr key={doc.documentId} className={doc.documentId === selectedDocumentId ? "active" : ""}>
-                          <td className="selectcell">
+                        <tr
+                          key={doc.documentId}
+                          className={doc.documentId === selectedDocumentId ? "active" : ""}
+                          onClick={() => {
+                            // "Selected" = previewed in the right-hand pane.
+                            // Clicking anywhere on the row except the
+                            // checkbox selects it — checked/unchecked state
+                            // (handleCheckboxClick) is untouched by this.
+                            setSelectedDocumentId(doc.documentId);
+                            // Clicking anywhere in the main window naturally
+                            // gives it focus, which would drop an open
+                            // pop-out behind it — hand focus straight back,
+                            // including for re-selecting the row that's
+                            // already selected (which wouldn't otherwise
+                            // trigger the selectedDocumentId-change effect
+                            // that also does this).
+                            viewerWindow.focusPopout();
+                          }}
+                        >
+                          <td className="selectcell" onClick={(e) => e.stopPropagation()}>
                             <input
                               type="checkbox"
                               checked={checkedDocumentIds.has(doc.documentId)}
@@ -901,11 +919,10 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
                               // do the actual state update in onChange,
                               // which fires right after — the standard,
                               // reliable React pattern for a controlled
-                              // checkbox. This is the ONLY way to
-                              // select/preview a row — clicking elsewhere on
-                              // the row does nothing, by design (see
-                              // handleCheckboxClick's own comment for its
-                              // toggle-only-this-one check-state behavior).
+                              // checkbox. Also selects/previews the row like
+                              // a plain row click would (see handleCheckboxClick's
+                              // own comment for its toggle-only-this-one
+                              // checked-state behavior).
                               onClick={(e) => {
                                 checkboxShiftKeyRef.current = e.shiftKey;
                               }}

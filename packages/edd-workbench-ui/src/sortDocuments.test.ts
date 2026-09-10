@@ -27,6 +27,7 @@ function doc(overrides: Partial<DocumentDTO>): DocumentDTO {
     metadata: null,
     contentWarning: null,
     createdAt: "2026-01-01T00:00:00.000Z",
+    uploadBatchId: "batch-0",
     ...overrides,
   };
 }

@@ -72,6 +72,7 @@ interface DocumentRow {
   metadata: unknown;
   content_warning: string | null;
   created_at: string;
+  upload_batch_id: string;
 }
 
 // Both queries below select from the same shared tree CTE (see
@@ -126,6 +127,7 @@ function toDocumentDTO(row: DocumentRow) {
     metadata: row.metadata,
     contentWarning: row.content_warning,
     createdAt: row.created_at,
+    uploadBatchId: row.upload_batch_id,
   };
 }
 
@@ -383,10 +385,14 @@ documentsRouter.post("/init-upload", async (req: Request<{ matterId: string }>, 
   try {
     const { orgId, userId } = req.eddContext!;
     const { matterId } = req.params;
-    const { files } = req.body as { files?: InitUploadFile[] };
+    const { files, uploadBatchId } = req.body as { files?: InitUploadFile[]; uploadBatchId?: string };
 
     if (!files || files.length === 0) {
       res.status(400).json({ error: "files array is required" });
+      return;
+    }
+    if (!uploadBatchId) {
+      res.status(400).json({ error: "uploadBatchId is required" });
       return;
     }
 
@@ -412,8 +418,8 @@ documentsRouter.post("/init-upload", async (req: Request<{ matterId: string }>, 
         const s3Key = `tenants/${orgId}/matters/${matterId}/documents/${documentId}/original.${extension}`;
 
         await client.query(
-          `INSERT INTO documents (id, org_id, matter_id, guid_number, original_filename, extension, size_bytes, file_modified_at, s3_key, content_type_detected, ingest_status, uploaded_by, family_document_id, depth)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', $11, $1, 0)`,
+          `INSERT INTO documents (id, org_id, matter_id, guid_number, original_filename, extension, size_bytes, file_modified_at, s3_key, content_type_detected, ingest_status, uploaded_by, family_document_id, depth, upload_batch_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', $11, $1, 0, $12)`,
           [
             documentId,
             orgId,
@@ -426,6 +432,7 @@ documentsRouter.post("/init-upload", async (req: Request<{ matterId: string }>, 
             s3Key,
             contentTypeDetected,
             userId,
+            uploadBatchId,
           ],
         );
 

@@ -95,11 +95,11 @@ export function createApiClient(baseUrl: string, getAccessToken: () => Promise<s
         body: JSON.stringify({ documentIds }),
       }),
 
-    /** Assigns GUIDs and mints a presigned S3 PUT URL per file, in one batch — see documents.ts's init-upload route. The actual bytes never pass through this API; the caller PUTs directly to each returned uploadUrl. */
-    initUpload: (matterId: string, files: InitUploadFileDTO[]) =>
+    /** Assigns GUIDs and mints a presigned S3 PUT URL per file, in one batch — see documents.ts's init-upload route. The actual bytes never pass through this API; the caller PUTs directly to each returned uploadUrl. uploadBatchId tags every resulting document row (and everything a container later expands it into) so the client can defer showing the batch until it's fully done — see useDocumentImport.ts. */
+    initUpload: (matterId: string, files: InitUploadFileDTO[], uploadBatchId: string) =>
       request<InitUploadResultDTO[]>(`/matters/${matterId}/documents/init-upload`, {
         method: "POST",
-        body: JSON.stringify({ files }),
+        body: JSON.stringify({ files, uploadBatchId }),
       }),
 
     /** Confirms a document's bytes have landed in S3 and enqueues it for ingest. Call only after the presigned PUT from initUpload has actually succeeded. */

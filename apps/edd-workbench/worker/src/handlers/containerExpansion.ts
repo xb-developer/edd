@@ -155,6 +155,8 @@ export async function expandMembers(params: {
   depth: number;
   computeLineage: (childDocumentId: string) => { parentDocumentId: string | null; familyDocumentId: string };
   members: AsyncIterable<ContainerMember> | Iterable<ContainerMember>;
+  /** Inherited unchanged from the container/parent being expanded — see migration 034's own comment. */
+  uploadBatchId: string;
 }): Promise<ExpandMembersResult> {
   const failures: MemberFailure[] = [];
   let succeeded = 0;
@@ -185,8 +187,8 @@ export async function expandMembers(params: {
         const { parentDocumentId, familyDocumentId } = params.computeLineage(childDocumentId);
 
         await client.query(
-          `INSERT INTO documents (id, org_id, matter_id, parent_document_id, family_document_id, depth, guid_number, original_filename, extension, size_bytes, s3_key, content_type_detected, ingest_status, metadata)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'pending', $13)`,
+          `INSERT INTO documents (id, org_id, matter_id, parent_document_id, family_document_id, depth, guid_number, original_filename, extension, size_bytes, s3_key, content_type_detected, ingest_status, metadata, upload_batch_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'pending', $13, $14)`,
           [
             childDocumentId,
             params.orgId,
@@ -201,6 +203,7 @@ export async function expandMembers(params: {
             s3Key,
             contentType,
             member.metadata ? JSON.stringify(member.metadata) : null,
+            params.uploadBatchId,
           ],
         );
 
@@ -238,6 +241,7 @@ export function expandTransparentContainerMembers(params: {
   matterId: string;
   container: { parentDocumentId: string | null; familyDocumentId: string; depth: number };
   members: AsyncIterable<ContainerMember> | Iterable<ContainerMember>;
+  uploadBatchId: string;
 }): Promise<ExpandMembersResult> {
   return expandMembers({
     orgId: params.orgId,
@@ -245,6 +249,7 @@ export function expandTransparentContainerMembers(params: {
     depth: params.container.depth,
     computeLineage: (childDocumentId) => containerPassThrough(params.container, childDocumentId),
     members: params.members,
+    uploadBatchId: params.uploadBatchId,
   });
 }
 
@@ -262,6 +267,7 @@ export function expandRealNodeAttachments(params: {
   matterId: string;
   parent: { id: string; familyDocumentId: string; depth: number };
   attachments: ContainerMember[];
+  uploadBatchId: string;
 }): Promise<ExpandMembersResult> {
   return expandMembers({
     orgId: params.orgId,
@@ -269,6 +275,7 @@ export function expandRealNodeAttachments(params: {
     depth: params.parent.depth + 1,
     computeLineage: () => ({ parentDocumentId: params.parent.id, familyDocumentId: params.parent.familyDocumentId }),
     members: params.attachments,
+    uploadBatchId: params.uploadBatchId,
   });
 }
 
@@ -351,6 +358,7 @@ export interface ContainerIngestParams {
   parentDocumentId: string | null;
   familyDocumentId: string;
   depth: number;
+  uploadBatchId: string;
 }
 
 async function streamToBuffer(stream: Readable): Promise<Buffer> {
@@ -421,7 +429,7 @@ export const MBOX_MAX_SIZE_BYTES = 80 * 1024 ** 3;
  * "how do I get a zip's real bytes out."
  */
 export async function handleZipIngest(params: ContainerIngestParams): Promise<void> {
-  const { documentId, orgId, matterId, s3Key, sizeBytes, parentDocumentId, familyDocumentId, depth } = params;
+  const { documentId, orgId, matterId, s3Key, sizeBytes, parentDocumentId, familyDocumentId, depth, uploadBatchId } = params;
 
   if (Number(sizeBytes) > ZIP_MAX_SIZE_BYTES) {
     await markContainerFailed(
@@ -446,7 +454,7 @@ export async function handleZipIngest(params: ContainerIngestParams): Promise<vo
       metadata: { source: "zip", zipPath: m.zipPath },
     }));
 
-    const result = await expandTransparentContainerMembers({ orgId, matterId, container: { parentDocumentId, familyDocumentId, depth }, members });
+    const result = await expandTransparentContainerMembers({ orgId, matterId, container: { parentDocumentId, familyDocumentId, depth }, members, uploadBatchId });
     await finalizeTransparentContainer({ orgId, documentId, s3Key, result });
   } catch (err) {
     // The zip itself couldn't be opened at all (missing S3 object,
@@ -464,7 +472,7 @@ export async function handleZipIngest(params: ContainerIngestParams): Promise<vo
  * sevenZip.ts's own extraction contract.
  */
 export async function handleSevenZipIngest(params: ContainerIngestParams): Promise<void> {
-  const { documentId, orgId, matterId, s3Key, sizeBytes, parentDocumentId, familyDocumentId, depth } = params;
+  const { documentId, orgId, matterId, s3Key, sizeBytes, parentDocumentId, familyDocumentId, depth, uploadBatchId } = params;
 
   if (Number(sizeBytes) > SEVEN_ZIP_MAX_SIZE_BYTES) {
     await markContainerFailed(
@@ -497,6 +505,7 @@ export async function handleSevenZipIngest(params: ContainerIngestParams): Promi
       matterId,
       container: { parentDocumentId, familyDocumentId, depth },
       members: members(),
+      uploadBatchId,
     });
     await finalizeTransparentContainer({ orgId, documentId, s3Key, result });
   } catch (err) {
@@ -526,7 +535,7 @@ export async function handleSevenZipIngest(params: ContainerIngestParams): Promi
  * queue, with zero duplicated parsing logic.
  */
 export async function handleMboxIngest(params: ContainerIngestParams): Promise<void> {
-  const { documentId, orgId, matterId, s3Key, sizeBytes, parentDocumentId, familyDocumentId, depth } = params;
+  const { documentId, orgId, matterId, s3Key, sizeBytes, parentDocumentId, familyDocumentId, depth, uploadBatchId } = params;
 
   if (Number(sizeBytes) > MBOX_MAX_SIZE_BYTES) {
     await markContainerFailed(
@@ -565,6 +574,7 @@ export async function handleMboxIngest(params: ContainerIngestParams): Promise<v
       matterId,
       container: { parentDocumentId, familyDocumentId, depth },
       members: members(),
+      uploadBatchId,
     });
     await finalizeTransparentContainer({ orgId, documentId, s3Key, result });
   } catch (err) {
@@ -615,7 +625,7 @@ export async function handleMboxIngest(params: ContainerIngestParams): Promise<v
  * hanging until Vitest's own test timeout.
  */
 export async function handlePstIngest(params: ContainerIngestParams): Promise<void> {
-  const { documentId, orgId, matterId, s3Key, sizeBytes, parentDocumentId, familyDocumentId, depth } = params;
+  const { documentId, orgId, matterId, s3Key, sizeBytes, parentDocumentId, familyDocumentId, depth, uploadBatchId } = params;
 
   if (Number(sizeBytes) > PST_MAX_SIZE_BYTES) {
     await markContainerFailed(
@@ -658,8 +668,8 @@ export async function handlePstIngest(params: ContainerIngestParams): Promise<vo
           const passThrough = containerPassThrough({ parentDocumentId, familyDocumentId }, childDocumentId);
 
           await client.query(
-            `INSERT INTO documents (id, org_id, matter_id, parent_document_id, family_document_id, depth, guid_number, original_filename, extension, size_bytes, s3_key, content_type_detected, ingest_status, title, author, subject, doc_date, metadata)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'eml', $9, NULL, 'eml', 'ready', $10, $11, $10, $12, $13)`,
+            `INSERT INTO documents (id, org_id, matter_id, parent_document_id, family_document_id, depth, guid_number, original_filename, extension, size_bytes, s3_key, content_type_detected, ingest_status, title, author, subject, doc_date, metadata, upload_batch_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'eml', $9, NULL, 'eml', 'ready', $10, $11, $10, $12, $13, $14)`,
             [
               childDocumentId,
               orgId,
@@ -686,6 +696,7 @@ export async function handlePstIngest(params: ContainerIngestParams): Promise<vo
                 folderPath: message.folderPath,
                 messageClass: message.messageClass,
               }),
+              uploadBatchId,
             ],
           );
 
@@ -702,6 +713,7 @@ export async function handlePstIngest(params: ContainerIngestParams): Promise<vo
           matterId,
           parent: { id: childDocumentId, familyDocumentId: messageFamilyDocumentId, depth },
           attachments: message.attachments.map((a) => ({ filename: a.filename, content: a.content })),
+          uploadBatchId,
         });
         messageCount++;
       } catch (err) {

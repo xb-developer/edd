@@ -122,7 +122,7 @@ describe("full ingest pipeline (end-to-end)", () => {
     // 1. init-upload — real GUID assignment, real presigned MinIO PUT URL.
     const initResponse = await request(app)
       .post(`/api/matters/${matterId}/documents/init-upload`)
-      .send({ files: [{ filename: "pipeline-test.eml", size: FIXTURE_EML.byteLength, contentType: "message/rfc822" }] });
+      .send({ files: [{ filename: "pipeline-test.eml", size: FIXTURE_EML.byteLength, contentType: "message/rfc822" }], uploadBatchId: randomUUID() });
     expect(initResponse.status).toBe(201);
     const { documentId, uploadUrl } = initResponse.body[0];
 

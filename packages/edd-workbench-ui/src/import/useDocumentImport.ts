@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ApiClient } from "../api";
 import { runImport, type ImportFailure } from "./runImport";
-import { stepIngestWatch, type IngestWatchStatusLookup } from "./ingestWatch";
+import { stepIngestWatch } from "./ingestWatch";
 
 export interface ImportProgress {
   current: number;
@@ -22,6 +22,7 @@ export interface UseDocumentImportResult {
   /** Backend ingest/processing phase — separate from `importProgress` (the S3 PUT step). Non-null from the moment a batch's uploads finish until every uploaded document has left pending/processing, or the poll gives up. */
   ingestProgress: IngestProgress | null;
   importFailures: ImportFailure[] | null;
+  /** Fires once a batch settles (cleanly or via give-up) — see onFileSettled's own doc comment on why this is the ONLY point `onFileSettled` (MatterDetail's refreshDocuments) is invoked from now. */
   importFiles: (files: File[]) => Promise<void>;
   dismissFailures: () => void;
   dismissIngestProgress: () => void;
@@ -52,16 +53,15 @@ export function useDocumentImport(api: ApiClient, matterId: string, onFileSettle
   const [importFailures, setImportFailures] = useState<ImportFailure[] | null>(null);
   const [ingestProgress, setIngestProgress] = useState<IngestProgress | null>(null);
 
-  // Ids currently being watched (union across every batch started since the
-  // last time ingestProgress went back to null) — a Set, not an array, so a
-  // second import started while the first is still processing merges
-  // cleanly instead of racing a replace.
-  const watchedIdsRef = useRef<Set<string>>(new Set());
-  // Denominator across the whole watch "session" (all batches since the
-  // last reset) — stepIngestWatch only ever sees stillPending shrink, so
-  // this has to be tracked separately to keep "N of M" stable as ids go
-  // terminal one at a time.
-  const totalWatchedRef = useRef(0);
+  // upload_batch_id(s) currently being watched (union across every batch
+  // started since the last time ingestProgress went back to null) — a Set,
+  // not a single id, so a second import started while the first is still
+  // processing merges cleanly instead of racing a replace. A whole batch id
+  // (not individual document ids) is what's tracked now — see migration
+  // 034 — so a container's exploded children (created well after the
+  // container's own upload, with ids the client never sees) are counted
+  // automatically, with no need to know their ids in advance.
+  const activeBatchIdsRef = useRef<Set<string>>(new Set());
   const attemptRef = useRef(0);
   // Read through a ref, not the dependency array — a fresh closure every
   // render would otherwise restart the interval on every render (the same
@@ -73,7 +73,7 @@ export function useDocumentImport(api: ApiClient, matterId: string, onFileSettle
 
   useEffect(() => {
     const timer = setInterval(async () => {
-      if (watchedIdsRef.current.size === 0) return;
+      if (activeBatchIdsRef.current.size === 0) return;
       attemptRef.current++;
 
       let latest;
@@ -83,32 +83,31 @@ export function useDocumentImport(api: ApiClient, matterId: string, onFileSettle
         return; // Transient fetch failure — try again next tick, don't give up on a network blip.
       }
 
-      const statusByDocumentId: IngestWatchStatusLookup = {};
-      for (const doc of latest) statusByDocumentId[doc.documentId] = doc.ingestStatus;
+      const result = stepIngestWatch(latest, activeBatchIdsRef.current, attemptRef.current, MAX_INGEST_POLL_ATTEMPTS);
+      const settled = result.pendingCount === 0 || result.giveUp;
 
-      const result = stepIngestWatch(Array.from(watchedIdsRef.current), statusByDocumentId, attemptRef.current, MAX_INGEST_POLL_ATTEMPTS);
-      watchedIdsRef.current = new Set(result.stillPending);
-
-      setIngestProgress((prev) => {
-        const failed = (prev?.failed ?? 0) + result.failedCount;
-        // Auto-dismiss only on a clean finish (nothing left pending, no
-        // failures) — same as the upload-phase banner clearing itself once
-        // its batch finishes. A finish with failures, or a "gave up" state,
-        // needs a human to notice it, so it stays until dismissIngestProgress.
-        if (result.stillPending.length === 0 && failed === 0) {
-          totalWatchedRef.current = 0;
-          attemptRef.current = 0;
-          return null;
-        }
-        return { total: totalWatchedRef.current, remaining: result.stillPending.length, failed, gaveUp: result.giveUp };
+      setIngestProgress(() => {
+        if (settled && result.failedCount === 0) return null;
+        return {
+          total: result.pendingCount + result.readyCount + result.failedCount,
+          remaining: result.pendingCount,
+          failed: result.failedCount,
+          gaveUp: result.giveUp,
+        };
       });
 
-      // This getMatterDocuments call above IS the refresh — no second
-      // fetch needed. An extra network round trip once every 3s while
-      // nothing has changed is a non-issue at eDiscovery matter volumes,
-      // and reusing the same callback MatterDetail already passes in for
-      // the upload phase avoids threading a second data path through.
-      onFileSettledRef.current?.();
+      // Deliberately NOT called on every tick (unlike the old per-document
+      // watch this replaced) — the whole point of batching by
+      // upload_batch_id is that the document list only updates once the
+      // WHOLE batch has left pending/processing (or the poll gives up on
+      // it), not incrementally as individual documents finish. See
+      // ingestWatch.ts's own comment for why a container's own row
+      // disappearing needs no special handling here any more.
+      if (settled) {
+        activeBatchIdsRef.current = new Set();
+        attemptRef.current = 0;
+        onFileSettledRef.current?.();
+      }
     }, INGEST_POLL_INTERVAL_MS);
     return () => clearInterval(timer);
   }, [api, matterId]);
@@ -117,11 +116,16 @@ export function useDocumentImport(api: ApiClient, matterId: string, onFileSettle
     async (files: File[]) => {
       if (files.length === 0) return;
 
+      // One id for every file picked in this call — set at init-upload
+      // time and inherited by every descendant a container later expands
+      // into (see migration 034), so the whole tree this upload eventually
+      // produces is watched as one unit, not just the top-level files.
+      const uploadBatchId = crypto.randomUUID();
+      let anyUploaded = false;
+
       setImporting(true);
       setImportFailures(null);
       setImportProgress({ current: 0, total: files.length, errors: 0 });
-
-      const uploadedIds: string[] = [];
 
       const { failures } = await runImport(files, {
         initUpload: (batch) =>
@@ -133,6 +137,7 @@ export function useDocumentImport(api: ApiClient, matterId: string, onFileSettle
               contentType: file.type || undefined,
               lastModified: file.lastModified,
             })),
+            uploadBatchId,
           ),
         uploadOne: async (file, init) => {
           // Content-Type here must exactly match what was reported to
@@ -147,21 +152,22 @@ export function useDocumentImport(api: ApiClient, matterId: string, onFileSettle
           });
           if (!res.ok) throw new Error(`Upload to storage failed (${res.status})`);
           await api.uploadComplete(matterId, init.documentId);
-          // Only recorded once upload-complete has actually succeeded —
-          // that's the point the SQS message really got sent, so it's the
-          // first moment ingestStatus can ever move off "pending".
-          uploadedIds.push(init.documentId);
+          anyUploaded = true;
         },
         onFileSettled: (_file, error) => {
           setImportProgress((prev) =>
             prev ? { current: prev.current + 1, total: prev.total, errors: prev.errors + (error ? 1 : 0) } : prev,
           );
-          // Refreshing on every settle (not just successes) also covers the
-          // partial-failure case where the upload itself succeeded but
-          // upload-complete didn't — the document row still exists
-          // (pending forever without this), so the list should still
-          // reflect it even though this file also counts as a failure.
-          onFileSettledRef.current?.();
+          // Deliberately does NOT call onFileSettledRef here any more — the
+          // document list is deferred until the whole batch (this upload
+          // phase AND the backend ingest that follows) settles, handled by
+          // the poll effect above. A document whose own upload-complete
+          // call fails never joins a watched batch (see the ingest-watch
+          // effect's `pendingCount` — a row with no successful
+          // upload-complete never got enqueued, so it'd never leave
+          // "pending" on its own); it still surfaces, just later, once the
+          // batch's poll gives up after MAX_INGEST_POLL_ATTEMPTS and
+          // refreshes anyway.
         },
       });
 
@@ -169,13 +175,12 @@ export function useDocumentImport(api: ApiClient, matterId: string, onFileSettle
       setImportProgress(null);
       if (failures.length > 0) setImportFailures(failures);
 
-      if (uploadedIds.length > 0) {
-        for (const id of uploadedIds) watchedIdsRef.current.add(id);
-        totalWatchedRef.current += uploadedIds.length;
+      if (anyUploaded) {
+        activeBatchIdsRef.current.add(uploadBatchId);
         attemptRef.current = 0;
         setIngestProgress((prev) => ({
-          total: totalWatchedRef.current,
-          remaining: watchedIdsRef.current.size,
+          total: prev?.total ?? files.length,
+          remaining: prev?.remaining ?? files.length,
           failed: prev?.failed ?? 0,
           gaveUp: false,
         }));
@@ -187,8 +192,7 @@ export function useDocumentImport(api: ApiClient, matterId: string, onFileSettle
   const dismissFailures = useCallback(() => setImportFailures(null), []);
 
   const dismissIngestProgress = useCallback(() => {
-    watchedIdsRef.current = new Set();
-    totalWatchedRef.current = 0;
+    activeBatchIdsRef.current = new Set();
     attemptRef.current = 0;
     setIngestProgress(null);
   }, []);

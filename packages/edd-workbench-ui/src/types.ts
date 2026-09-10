@@ -82,6 +82,8 @@ export interface DocumentDTO {
   /** Set when this document's extracted text resembles an AI prompt-injection attempt (see COLLATE_SECURITY_FINDINGS.md Finding 1 and embedding.ts's own detection pass) — null for every ordinary document. A warning, not a block: the document is still fully searchable/AI-indexed, so a reviewer can judge an AI answer citing it accordingly. */
   contentWarning: string | null;
   createdAt: string;
+  /** Groups every document one client-side upload produced (including every descendant a container/attachment later expands into) — see migration 034. Used client-side to defer showing a batch's results until the whole batch has left pending/processing, not rendered anywhere. */
+  uploadBatchId: string;
 }
 
 // Coding/tagging (see apps/edd-workbench/CONTEXT.md for the "coding"/"tag

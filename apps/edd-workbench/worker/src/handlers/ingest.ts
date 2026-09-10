@@ -47,6 +47,7 @@ interface DocumentRow {
   family_document_id: string;
   depth: number;
   parent_document_id: string | null;
+  upload_batch_id: string;
 }
 
 // content_type_detected values that route straight through the shared
@@ -101,7 +102,7 @@ export async function handleIngestMessage(body: string): Promise<void> {
 
   const containerJob = await withOrgSession(orgId, async (client) => {
     const docRow = await client.query<DocumentRow>(
-      "SELECT s3_key, content_type_detected, matter_id, size_bytes, family_document_id, depth, parent_document_id FROM documents WHERE id = $1",
+      "SELECT s3_key, content_type_detected, matter_id, size_bytes, family_document_id, depth, parent_document_id, upload_batch_id FROM documents WHERE id = $1",
       [documentId],
     );
     if (docRow.rowCount === 0) {
@@ -117,10 +118,11 @@ export async function handleIngestMessage(body: string): Promise<void> {
       family_document_id: familyDocumentId,
       depth,
       parent_document_id: parentDocumentId,
+      upload_batch_id: uploadBatchId,
     } = docRow.rows[0];
 
     if (contentType === "pst" || contentType === "zip" || contentType === "7z" || contentType === "mbox") {
-      return { contentType, s3Key, matterId, sizeBytes, familyDocumentId, depth, parentDocumentId };
+      return { contentType, s3Key, matterId, sizeBytes, familyDocumentId, depth, parentDocumentId, uploadBatchId };
     }
 
     shouldIndexForSearch = true;
@@ -180,7 +182,7 @@ export async function handleIngestMessage(body: string): Promise<void> {
             documentId,
           ],
         );
-        await expandRealNodeAttachments({ orgId, matterId, parent: { id: documentId, familyDocumentId, depth }, attachments: eml.attachments });
+        await expandRealNodeAttachments({ orgId, matterId, parent: { id: documentId, familyDocumentId, depth }, attachments: eml.attachments, uploadBatchId });
       } else if (contentType === "docx") {
         const office = await extractOfficeMetadata(buffer);
         const docx = await extractDocxContent(buffer);
@@ -264,7 +266,7 @@ export async function handleIngestMessage(body: string): Promise<void> {
             documentId,
           ],
         );
-        await expandRealNodeAttachments({ orgId, matterId, parent: { id: documentId, familyDocumentId, depth }, attachments: msg.attachments });
+        await expandRealNodeAttachments({ orgId, matterId, parent: { id: documentId, familyDocumentId, depth }, attachments: msg.attachments, uploadBatchId });
       } else if (contentType === "pdf" || contentType === "image" || contentType === "tiff") {
         // Title/author/subject/modified live in the PDF's own Info
         // dictionary independently of whether it has a real text layer —
@@ -382,6 +384,7 @@ export async function handleIngestMessage(body: string): Promise<void> {
       parentDocumentId: containerJob.parentDocumentId,
       familyDocumentId: containerJob.familyDocumentId,
       depth: containerJob.depth,
+      uploadBatchId: containerJob.uploadBatchId,
     });
   } else if (containerJob?.contentType === "zip") {
     await handleZipIngest({
@@ -393,6 +396,7 @@ export async function handleIngestMessage(body: string): Promise<void> {
       parentDocumentId: containerJob.parentDocumentId,
       familyDocumentId: containerJob.familyDocumentId,
       depth: containerJob.depth,
+      uploadBatchId: containerJob.uploadBatchId,
     });
   } else if (containerJob?.contentType === "7z") {
     await handleSevenZipIngest({
@@ -404,6 +408,7 @@ export async function handleIngestMessage(body: string): Promise<void> {
       parentDocumentId: containerJob.parentDocumentId,
       familyDocumentId: containerJob.familyDocumentId,
       depth: containerJob.depth,
+      uploadBatchId: containerJob.uploadBatchId,
     });
   } else if (containerJob?.contentType === "mbox") {
     await handleMboxIngest({
@@ -415,6 +420,7 @@ export async function handleIngestMessage(body: string): Promise<void> {
       parentDocumentId: containerJob.parentDocumentId,
       familyDocumentId: containerJob.familyDocumentId,
       depth: containerJob.depth,
+      uploadBatchId: containerJob.uploadBatchId,
     });
   }
 }

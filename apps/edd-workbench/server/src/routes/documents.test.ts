@@ -158,6 +158,7 @@ describe("documents router — init-upload", () => {
           },
           { filename: "correspondence.eml", size: 4096, contentType: "message/rfc822" },
         ],
+        uploadBatchId: randomUUID(),
       });
 
     expect(response.status).toBe(201);
@@ -213,6 +214,7 @@ describe("documents router — init-upload", () => {
           { filename: "drawing.dwg", size: 1024 },
           { filename: "schedule.mpp", size: 1024 },
         ],
+        uploadBatchId: randomUUID(),
       });
 
     expect(response.status).toBe(201);
@@ -241,8 +243,42 @@ describe("documents router — init-upload", () => {
 
   it("rejects an empty files array", async () => {
     const app = buildTestApp({ orgId, userId, role: "admin", email: "tester@example.com" });
-    const response = await request(app).post(`/api/matters/${matterId}/documents/init-upload`).send({ files: [] });
+    const response = await request(app)
+      .post(`/api/matters/${matterId}/documents/init-upload`)
+      .send({ files: [], uploadBatchId: randomUUID() });
     expect(response.status).toBe(400);
+  });
+
+  it("rejects a request with no uploadBatchId", async () => {
+    const app = buildTestApp({ orgId, userId, role: "admin", email: "tester@example.com" });
+    const response = await request(app)
+      .post(`/api/matters/${matterId}/documents/init-upload`)
+      .send({ files: [{ filename: "no-batch-id.txt", size: 10 }] });
+    expect(response.status).toBe(400);
+  });
+
+  it("tags every document in a batch with the same upload_batch_id (migration 034)", async () => {
+    const app = buildTestApp({ orgId, userId, role: "admin", email: "tester@example.com" });
+    const uploadBatchId = randomUUID();
+    const response = await request(app)
+      .post(`/api/matters/${matterId}/documents/init-upload`)
+      .send({
+        files: [
+          { filename: "batch-tag-a.txt", size: 10 },
+          { filename: "batch-tag-b.txt", size: 10 },
+        ],
+        uploadBatchId,
+      });
+
+    expect(response.status).toBe(201);
+    const rows = await withOrgSession(orgId, (client) =>
+      client.query<{ upload_batch_id: string }>(
+        "SELECT upload_batch_id FROM documents WHERE matter_id = $1 AND original_filename LIKE 'batch-tag-%'",
+        [matterId],
+      ),
+    );
+    expect(rows.rows).toHaveLength(2);
+    expect(rows.rows.every((r) => r.upload_batch_id === uploadBatchId)).toBe(true);
   });
 });
 
@@ -253,7 +289,7 @@ describe("documents router — init-upload storage quota", () => {
       const app = buildTestApp({ orgId, userId, role: "admin", email: "tester@example.com" });
       const response = await request(app)
         .post(`/api/matters/${matterId}/documents/init-upload`)
-        .send({ files: [{ filename: "huge.zip", size: MATTER_STORAGE_QUOTA_BYTES + 1 }] });
+        .send({ files: [{ filename: "huge.zip", size: MATTER_STORAGE_QUOTA_BYTES + 1 }], uploadBatchId: randomUUID() });
 
       expect(response.status).toBe(201);
       expect(response.body).toEqual([{ error: `"huge.zip" would exceed this matter's 3GB storage quota` }]);
@@ -276,6 +312,7 @@ describe("documents router — init-upload storage quota", () => {
             { filename: "exact-fit.zip", size: MATTER_STORAGE_QUOTA_BYTES },
             { filename: "one-byte-too-many.txt", size: 1 },
           ],
+          uploadBatchId: randomUUID(),
         });
 
       expect(response.status).toBe(201);
@@ -298,6 +335,7 @@ describe("documents router — init-upload storage quota", () => {
             { filename: "first-2gb.zip", size: twoGb },
             { filename: "second-2gb.zip", size: twoGb },
           ],
+          uploadBatchId: randomUUID(),
         });
 
       expect(response.status).toBe(201);
@@ -326,7 +364,7 @@ describe("documents router — init-upload storage quota", () => {
 
       const response = await request(app)
         .post(`/api/matters/${matterId}/documents/init-upload`)
-        .send({ files: [{ filename: "just-over.txt", size: 200 }] });
+        .send({ files: [{ filename: "just-over.txt", size: 200 }], uploadBatchId: randomUUID() });
 
       expect(response.status).toBe(201);
       expect(response.body).toEqual([{ error: `"just-over.txt" would exceed this matter's 3GB storage quota` }]);

@@ -1,64 +1,60 @@
 /**
- * documentId -> ingestStatus, from the latest getMatterDocuments refetch.
- * An id absent from this lookup means its row was DELETED — a real,
- * expected outcome, not "hasn't loaded yet": a fully, successfully
- * expanded transparent container (PST/OST/zip/7z/mbox — see ingest.ts's
- * handlePstIngest et al.) deletes its own document row once every one of
- * its members/messages has been extracted, precisely because there's
- * nothing left to review beyond what's now its own independent children.
- * Every id this watcher ever tracks was already confirmed to exist (added
- * only after its own upload-complete call succeeded), so "absent" can only
- * mean that clean-deletion outcome, never "not yet visible" — treating it
- * as still-pending (the original design here) meant a fully successful
- * container upload could never be observed leaving pending at all, since
- * there's no "ready" row left to report one: the progress bar would sit
- * frozen until the poll simply gave up. Confirmed as a real bug on a real
- * PST upload, not a hypothetical.
+ * One document row's shape, as far as this pure module cares — a subset of
+ * DocumentDTO so tests can pass plain objects without importing the real
+ * type.
  */
-export interface IngestWatchStatusLookup {
-  [documentId: string]: "pending" | "processing" | "ready" | "failed" | undefined;
+export interface IngestWatchDocument {
+  uploadBatchId: string;
+  ingestStatus: "pending" | "processing" | "ready" | "failed";
 }
 
 export interface IngestWatchStepResult {
-  stillPending: string[];
+  /** Count of documents currently tagged with one of the watched batch ids that are still pending/processing. */
+  pendingCount: number;
   readyCount: number;
   failedCount: number;
-  /** True once `attempt >= maxAttempts` and stillPending is non-empty — the caller should stop polling and show a "give up" state rather than loop forever (a document whose upload-complete call itself failed, or whose SQS message dead-letters, would otherwise spin the banner indefinitely). */
+  /** True once `attempt >= maxAttempts` and pendingCount is non-zero — the caller should stop polling and show a "give up" state rather than loop forever (a document whose upload-complete call itself failed, or whose SQS message dead-letters, would otherwise spin the banner indefinitely). */
   giveUp: boolean;
 }
 
 /**
- * One pure step of the ingest-watch loop: given the set of documentIds
- * still being watched and the latest known ingestStatus per document,
- * decides which ids have left pending/processing and whether to keep
- * polling. No timers, no fetch — the effectful shell (useDocumentImport.ts)
- * owns setInterval and the actual refetch, same pure/effectful split as
- * runImport.ts/popoutState.ts.
+ * One pure step of the ingest-watch loop: given every document currently
+ * tagged with one of the watched upload_batch_ids (see migration 034) and
+ * the current polling attempt, summarizes how much of the batch is left.
+ *
+ * Unlike the old per-document-id watch this replaces, there's no need to
+ * special-case a row that's since been deleted (a fully successful
+ * transparent-container expansion — pst/zip/7z/mbox — deletes its own
+ * container row once every member has been extracted): a deleted row
+ * simply isn't in `documents` any more, so it silently stops contributing
+ * to any of the three counts below, which is exactly correct — it's gone
+ * because its work is done, and every one of its extracted children (which
+ * inherited the same upload_batch_id) is still counted individually until
+ * *they* resolve too. No timers, no fetch — the effectful shell
+ * (useDocumentImport.ts) owns setInterval and the actual refetch, same
+ * pure/effectful split as runImport.ts/popoutState.ts.
  */
 export function stepIngestWatch(
-  watchedIds: readonly string[],
-  statusByDocumentId: IngestWatchStatusLookup,
+  documents: readonly IngestWatchDocument[],
+  watchedBatchIds: ReadonlySet<string>,
   attempt: number,
   maxAttempts: number,
 ): IngestWatchStepResult {
+  let pendingCount = 0;
   let readyCount = 0;
   let failedCount = 0;
-  const stillPending: string[] = [];
 
-  for (const id of watchedIds) {
-    const status = statusByDocumentId[id];
-    if (status === "failed") failedCount++;
-    // status === undefined: the row is gone — a fully successful
-    // transparent-container expansion (see this file's own top comment),
-    // counted as ready alongside a real "ready" row.
-    else if (status === "ready" || status === undefined) readyCount++;
-    else stillPending.push(id);
+  for (const doc of documents) {
+    if (!watchedBatchIds.has(doc.uploadBatchId)) continue;
+    if (doc.ingestStatus === "failed") failedCount++;
+    else if (doc.ingestStatus === "ready") readyCount++;
+    else pendingCount++;
   }
 
   return {
-    stillPending,
+    pendingCount,
     readyCount,
     failedCount,
-    giveUp: stillPending.length > 0 && attempt >= maxAttempts,
+    giveUp: pendingCount > 0 && attempt >= maxAttempts,
   };
 }

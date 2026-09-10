@@ -205,6 +205,9 @@ export function FilterPanel({
           value={searchQuery}
           onChange={(e) => onSearchQueryChange(e.target.value)}
         />
+        <button type="button" className="pop-out-btn" onClick={() => onSearchQueryChange("")} disabled={!searchQuery}>
+          Clear Search
+        </button>
         {searchError && <p className="bulk-note">{searchError}</p>}
         {searchTotalHits !== null && matchingDocumentCount !== null && searchTotalHits > matchingDocumentCount && (
           <p className="bulk-note">

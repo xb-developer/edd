@@ -380,6 +380,15 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
 
   useEffect(refreshDocuments, [matterId]);
 
+  // A stale search query from the previous matter has no meaning here —
+  // clear it the moment the open matter changes, same as FilterPanel's own
+  // question-clearing effect for Ask. The debounced search effect below
+  // reacts to this (trimmed empty -> clears matchingDocumentIds/
+  // searchTotalHits/searchError too), so nothing else needs resetting here.
+  useEffect(() => {
+    setSearchQuery("");
+  }, [matterId]);
+
   // Debounced so a real backend request isn't fired on every keystroke —
   // Elasticsearch-backed, replacing the old client-side filename filter
   // entirely (see FilterPanel.tsx's own updated comment).

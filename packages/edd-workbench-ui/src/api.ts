@@ -184,6 +184,17 @@ export function createApiClient(baseUrl: string, getAccessToken: () => Promise<s
 
     /** Backs the topbar's WorkerHealthBar search-index chip. Available to any authenticated caller, scoped to their own org. */
     getSearchHealth: () => request<SearchHealthDTO>("/search-health"),
+
+    /** Whole-org audit trail as a CSV Blob (admin-only server-side — see audit.ts). Returns the Blob rather than triggering the save itself — an <a download> synthetic click needs to happen in response to the same user gesture that called this, which the caller owns, not this file. */
+    downloadAuditLog: async () => {
+      const token = await getAccessToken();
+      const res = await fetch(`${baseUrl}/audit/export`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new ApiError(body.error ?? `Request failed: ${res.status}`, res.status);
+      }
+      return res.blob();
+    },
   };
 }
 

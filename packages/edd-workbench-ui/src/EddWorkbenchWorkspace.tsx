@@ -36,6 +36,7 @@ export function EddWorkbenchWorkspace({ apiBaseUrl = "http://localhost:4430/api"
   const [me, setMe] = useState<{ userId: string; role: string } | null>(null);
   const [creating, setCreating] = useState(false);
   const [deletingMatter, setDeletingMatter] = useState(false);
+  const [downloadingAudit, setDownloadingAudit] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState("");
   const [showNotices, setShowNotices] = useState(false);
@@ -135,6 +136,29 @@ export function EddWorkbenchWorkspace({ apiBaseUrl = "http://localhost:4430/api"
     }
   }
 
+  async function handleDownloadAuditLog() {
+    setDownloadingAudit(true);
+    try {
+      setError(null);
+      const blob = await api.downloadAuditLog();
+      // Blob -> temporary object URL -> synthetic <a download> click is the
+      // standard way to save a fetched (not navigated-to) file — the
+      // Authorization header this needs can't be attached to a plain
+      // <a href> navigation, so a real anchor click has to happen here,
+      // inside this same user-gesture-triggered handler.
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `audit-log-${new Date().toISOString().slice(0, 10)}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setDownloadingAudit(false);
+    }
+  }
+
   async function handleCreateMatter() {
     setCreating(true);
     try {
@@ -196,6 +220,10 @@ export function EddWorkbenchWorkspace({ apiBaseUrl = "http://localhost:4430/api"
   // requireRole("admin") on the DELETE route (deleting a matter is a much
   // bigger blast radius than creating or renaming one).
   const canDeleteMatter = me?.role === "admin";
+  // Same admin-only gate as canDeleteMatter, named separately since it's a
+  // different action — matches the server's own requireRole("admin") on
+  // GET /audit/export (audit_log reveals every user's activity org-wide).
+  const canDownloadAuditLog = me?.role === "admin";
 
   // Distinct from the plain "still loading" case below — this is a known,
   // final state (the fetch succeeded; there's just nothing this user can
@@ -288,6 +316,11 @@ export function EddWorkbenchWorkspace({ apiBaseUrl = "http://localhost:4430/api"
         {canCreateMatters && (
           <button type="button" className="topbar-btn" style={{ marginLeft: 0 }} onClick={handleCreateMatter} disabled={creating}>
             {creating ? "Creating…" : "Create Matter"}
+          </button>
+        )}
+        {canDownloadAuditLog && (
+          <button type="button" className="topbar-btn" style={{ marginLeft: 0 }} onClick={handleDownloadAuditLog} disabled={downloadingAudit}>
+            {downloadingAudit ? "Downloading…" : "Download Audit Log"}
           </button>
         )}
         {canDeleteMatter && (

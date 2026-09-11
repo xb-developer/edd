@@ -46,23 +46,23 @@ export function DocumentViewer({ api, matterId, document }: DocumentViewerProps)
     const attachments = Array.isArray(metadata.attachmentFilenames) ? (metadata.attachmentFilenames as string[]) : [];
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 12, height: "100%", overflowY: "auto" }}>
-        <dl className="email-head">
+        <dl className="mb-2.5 flex flex-col gap-[3px] rounded border border-line bg-[#fafaf9] px-3 py-2.5 text-xs">
           <div>
-            <span className="email-label">From</span> {document.author ?? "(unknown)"}
+            <span className="inline-block w-[52px] text-[10px] font-semibold text-ink-soft uppercase">From</span> {document.author ?? "(unknown)"}
           </div>
           <div>
-            <span className="email-label">To</span> {typeof metadata.to === "string" ? metadata.to : "(unknown)"}
+            <span className="inline-block w-[52px] text-[10px] font-semibold text-ink-soft uppercase">To</span> {typeof metadata.to === "string" ? metadata.to : "(unknown)"}
           </div>
           {metadata.cc ? (
             <div>
-              <span className="email-label">Cc</span> {String(metadata.cc)}
+              <span className="inline-block w-[52px] text-[10px] font-semibold text-ink-soft uppercase">Cc</span> {String(metadata.cc)}
             </div>
           ) : null}
           <div>
-            <span className="email-label">Date</span> {document.docDate ? formatDate(document.docDate) : "(unknown)"}
+            <span className="inline-block w-[52px] text-[10px] font-semibold text-ink-soft uppercase">Date</span> {document.docDate ? formatDate(document.docDate) : "(unknown)"}
           </div>
           <div>
-            <span className="email-label">Subject</span> {document.subject ?? "(no subject)"}
+            <span className="inline-block w-[52px] text-[10px] font-semibold text-ink-soft uppercase">Subject</span> {document.subject ?? "(no subject)"}
           </div>
         </dl>
         {typeof metadata.bodyHtml === "string" ? (
@@ -77,12 +77,12 @@ export function DocumentViewer({ api, matterId, document }: DocumentViewerProps)
           // Some older Outlook messages store their body only as compressed
           // RTF, which msg.ts doesn't decode — this is that known,
           // deliberate limitation surfacing, not a bug to chase here.
-          <p className="empty-note">No readable body.</p>
+          <p className="px-0.5 py-1 text-[11.5px] italic text-ink-soft">No readable body.</p>
         )}
         {attachments.length > 0 && (
-          <div className="email-attachments">
+          <div className="mb-2.5 flex flex-wrap gap-1.5">
             {attachments.map((name) => (
-              <span key={name} className="chip" style={{ background: "var(--slate-soft)", color: "var(--ink-soft)" }}>
+              <span key={name} className="flex-none whitespace-nowrap rounded-[9px] px-[7px] py-0.5 text-[10px] font-semibold" style={{ background: "var(--slate-soft)", color: "var(--ink-soft)" }}>
                 {name}
               </span>
             ))}
@@ -92,8 +92,8 @@ export function DocumentViewer({ api, matterId, document }: DocumentViewerProps)
     );
   }
 
-  if (error) return <div className="preview-unsupported">{error}</div>;
-  if (needsViewUrl && !viewUrl) return <p className="empty-note">Loading preview…</p>;
+  if (error) return <div className="rounded border border-dashed border-line p-6 text-center text-xs text-ink-soft">{error}</div>;
+  if (needsViewUrl && !viewUrl) return <p className="px-0.5 py-1 text-[11.5px] italic text-ink-soft">Loading preview…</p>;
 
   switch (kind) {
     case "native-pdf":
@@ -113,12 +113,12 @@ export function DocumentViewer({ api, matterId, document }: DocumentViewerProps)
     default:
       // A corrupt/unrecognized file (viewerKindFor's "unsupported") also
       // falls here — never a blank viewer with no explanation.
-      return <div className="preview-unsupported">Preview not yet available for this file type ({document.contentTypeDetected}).</div>;
+      return <div className="rounded border border-dashed border-line p-6 text-center text-xs text-ink-soft">Preview not yet available for this file type ({document.contentTypeDetected}).</div>;
   }
 }
 
 function DocxViewer({ html }: { html: string | null }) {
-  if (!html) return <div className="preview-unsupported">No preview available for this document.</div>;
+  if (!html) return <div className="rounded border border-dashed border-line p-6 text-center text-xs text-ink-soft">No preview available for this document.</div>;
   // Same threat model as the email body above: docx content is untrusted
   // third-party material, sanitized at render time rather than at
   // extraction time so storage always holds the original conversion.
@@ -126,7 +126,7 @@ function DocxViewer({ html }: { html: string | null }) {
 }
 
 function ExtractedTextViewer({ text }: { text: string | null }) {
-  if (!text) return <div className="preview-unsupported">No preview available for this document.</div>;
+  if (!text) return <div className="rounded border border-dashed border-line p-6 text-center text-xs text-ink-soft">No preview available for this document.</div>;
   return <pre className="preview-text" style={{ height: "100%" }}>{text}</pre>;
 }
 
@@ -137,7 +137,7 @@ interface XlsxSheetView {
 
 function XlsxViewer({ sheets }: { sheets: XlsxSheetView[] }) {
   const [activeSheet, setActiveSheet] = useState(0);
-  if (sheets.length === 0) return <div className="preview-unsupported">No preview available for this spreadsheet.</div>;
+  if (sheets.length === 0) return <div className="rounded border border-dashed border-line p-6 text-center text-xs text-ink-soft">No preview available for this spreadsheet.</div>;
   const sheet = sheets[Math.min(activeSheet, sheets.length - 1)];
 
   return (
@@ -178,6 +178,6 @@ function TextViewer({ url }: { url: string }) {
       .then((r) => r.text())
       .then(setText);
   }, [url]);
-  if (text === null) return <p className="empty-note">Loading preview…</p>;
+  if (text === null) return <p className="px-0.5 py-1 text-[11.5px] italic text-ink-soft">Loading preview…</p>;
   return <pre className="preview-text" style={{ height: "100%" }}>{text}</pre>;
 }

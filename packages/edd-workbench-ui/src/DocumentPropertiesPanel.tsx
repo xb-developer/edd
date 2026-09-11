@@ -25,10 +25,10 @@ export function DocumentPropertiesPanel({ document }: DocumentPropertiesPanelPro
   const hasFamily = document.familyGuid !== document.guid;
 
   return (
-    <div className="doc-head">
-      <span className="guid-badge">{document.guid}</span>
-      <div className="dname">{displayName(document)}</div>
-      <dl className="meta-grid">
+    <div className="mb-3">
+      <span className="mb-1.5 inline-block rounded-[3px] bg-navy px-2 py-0.5 font-mono text-[11px] font-semibold text-white">{document.guid}</span>
+      <div className="text-[13.5px] font-semibold break-words">{displayName(document)}</div>
+      <dl className="mt-2.5 grid grid-cols-[auto_1fr] gap-x-2.5 gap-y-[5px] text-[11.5px] [&_dt]:text-ink-soft [&_dd]:m-0 [&_dd]:break-words">
         <dt>Type</dt>
         <dd>{document.extension || document.contentTypeDetected}</dd>
         <dt>Size</dt>

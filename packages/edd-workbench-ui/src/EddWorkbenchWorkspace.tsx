@@ -263,10 +263,10 @@ function EddWorkbenchWorkspaceInner({ apiBaseUrl = "http://localhost:4430/api", 
             </Button>
           )}
         </header>
-        <p className="empty-note" style={{ padding: 24 }}>
+        <p className="px-0.5 py-1 text-[11.5px] italic text-ink-soft" style={{ padding: 24 }}>
           You don't have access to any matters yet. Ask an admin to add you to one.
         </p>
-        {error && <p className="bulk-note">{error}</p>}
+        {error && <p className="mt-1.5 text-[11.5px] text-seal">{error}</p>}
         {showNotices && <NoticeDialog onClose={() => setShowNotices(false)} />}
       </div>
     );
@@ -291,8 +291,8 @@ function EddWorkbenchWorkspaceInner({ apiBaseUrl = "http://localhost:4430/api", 
             </Button>
           )}
         </header>
-        <p className="empty-note">Loading…</p>
-        {error && <p className="bulk-note">{error}</p>}
+        <p className="px-0.5 py-1 text-[11.5px] italic text-ink-soft">Loading…</p>
+        {error && <p className="mt-1.5 text-[11.5px] text-seal">{error}</p>}
         {showNotices && <NoticeDialog onClose={() => setShowNotices(false)} />}
       </div>
     );
@@ -370,7 +370,7 @@ function EddWorkbenchWorkspaceInner({ apiBaseUrl = "http://localhost:4430/api", 
           </Button>
         )}
       </header>
-      {error && <p className="bulk-note">{error}</p>}
+      {error && <p className="mt-1.5 text-[11.5px] text-seal">{error}</p>}
       {showNotices && <NoticeDialog onClose={() => setShowNotices(false)} />}
       <main className="flex min-h-0 flex-1">
         <MatterDetail

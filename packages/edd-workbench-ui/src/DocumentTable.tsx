@@ -272,6 +272,10 @@ export function DocumentTable({
       key: "__select",
       width: SELECT_CELL_WIDTH,
       fixed: "left" as const,
+      // The one cell with no padding — it holds only a checkbox. Reaching
+      // an antd cell's own padding needs a selector, so this is a hook for
+      // the rule in styles.css, not a Tailwind class.
+      className: "selectcell",
       title: (
         <Checkbox
           checked={allChecked}
@@ -350,7 +354,7 @@ export function DocumentTable({
   const totalWidth = SELECT_CELL_WIDTH + CHECK_CELL_WIDTH + Object.values(columnWidths.widths).reduce((sum, w) => sum + w, 0);
 
   return (
-    <div className="table-wrap" ref={columnWidths.containerRef}>
+    <div className="relative min-h-0 w-full min-w-0 flex-1 overflow-hidden" ref={columnWidths.containerRef}>
       <Table<DocumentDTO>
         virtual
         size="small"
@@ -405,9 +409,9 @@ function renderCell(
 ): ReactNode {
   switch (key) {
     case "guid":
-      return <span className="guid">{doc.guid}</span>;
+      return <span className="font-mono font-semibold tracking-[0.02em] text-navy">{doc.guid}</span>;
     case "familyGuid":
-      return <span className="muted">{doc.familyGuid}</span>;
+      return <span className="text-ink-soft">{doc.familyGuid}</span>;
     case "originalFilename":
       return (
         <span
@@ -417,24 +421,24 @@ function renderCell(
           // a Tailwind class.
           style={doc.depth > 0 ? { paddingLeft: doc.depth * 16 } : undefined}
         >
-          {doc.depth > 0 && <span className="muted">↳ </span>}
+          {doc.depth > 0 && <span className="text-ink-soft">↳ </span>}
           {stripExtension(displayFilename(doc), doc.extension)}
         </span>
       );
     case "extension":
-      return <span className="muted">{doc.extension}</span>;
+      return <span className="text-ink-soft">{doc.extension}</span>;
     case "sizeBytes":
-      return <span className="muted">{formatSize(doc.sizeBytes)}</span>;
+      return <span className="text-ink-soft">{formatSize(doc.sizeBytes)}</span>;
     case "docDate":
-      return <span className="muted">{formatDate(doc.docDate)}</span>;
+      return <span className="text-ink-soft">{formatDate(doc.docDate)}</span>;
     case "author":
-      return <span className="muted">{doc.author}</span>;
+      return <span className="text-ink-soft">{doc.author}</span>;
     case "contentModifiedAt":
-      return <span className="muted">{formatDate(doc.contentModifiedAt)}</span>;
+      return <span className="text-ink-soft">{formatDate(doc.contentModifiedAt)}</span>;
     case "toAddresses":
-      return <span className="muted">{doc.toAddresses}</span>;
+      return <span className="text-ink-soft">{doc.toAddresses}</span>;
     case "ccAddresses":
-      return <span className="muted">{doc.ccAddresses}</span>;
+      return <span className="text-ink-soft">{doc.ccAddresses}</span>;
     case "tags":
       return <TagChips doc={doc} appliedTagsByDocument={appliedTagsByDocument} tagsById={tagsById} />;
   }
@@ -451,18 +455,18 @@ function TagChips({
 }) {
   const appliedTagIds = appliedTagsByDocument[doc.documentId] ?? [];
   return (
-    <div className="tagchips">
+    <div className="flex h-row max-w-[220px] flex-nowrap items-center gap-1 overflow-x-auto overflow-y-hidden">
       {/* Chip colours are data (an ingest status, or a tag's own colour from
           the database), so they stay inline — there is no finite set of
           Tailwind classes that could cover them. */}
       <span
-        className="chip"
+        className="flex-none whitespace-nowrap rounded-[9px] px-[7px] py-0.5 text-[10px] font-semibold"
         style={{ background: `${INGEST_STATUS_COLORS[doc.ingestStatus]}22`, color: INGEST_STATUS_COLORS[doc.ingestStatus] }}
       >
         {doc.ingestStatus}
       </span>
       {doc.contentWarning && (
-        <span className="chip" style={{ background: "#A6362C22", color: "#A6362C" }} title={doc.contentWarning}>
+        <span className="flex-none whitespace-nowrap rounded-[9px] px-[7px] py-0.5 text-[10px] font-semibold" style={{ background: "#A6362C22", color: "#A6362C" }} title={doc.contentWarning}>
           ⚠ possible injection
         </span>
       )}
@@ -473,7 +477,7 @@ function TagChips({
           ? { background: `${tag.color}22`, color: tag.color }
           : { background: "var(--slate-soft)", color: "var(--ink-soft)" };
         return (
-          <span key={tagId} className="chip" style={style}>
+          <span key={tagId} className="flex-none whitespace-nowrap rounded-[9px] px-[7px] py-0.5 text-[10px] font-semibold" style={style}>
             {tag.name}
           </span>
         );

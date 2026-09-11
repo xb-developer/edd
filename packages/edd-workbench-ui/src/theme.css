@@ -76,3 +76,52 @@
   --sans: var(--font-sans);
   --row-h: var(--spacing-row);
 }
+
+/*
+ * Global base styles, in Tailwind's own base layer so its preflight comes
+ * first and these win where the two disagree.
+ *
+ * These are genuinely global — `html/body/#root` needing a real height is
+ * what gives every panel below a bounded height to scroll inside, and the
+ * login screen in the client's own main.tsx renders outside the workspace
+ * entirely, so none of this can live on a component.
+ */
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+  }
+  body {
+    font-family: var(--font-sans);
+    background: var(--color-paper);
+    color: var(--color-ink);
+    font-size: 13px;
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection {
+    background: #d8deea;
+  }
+  /* Tailwind's preflight already resets these to the surrounding font;
+     what it does not do is make buttons show a pointer cursor (v4 dropped
+     that), which this app assumes everywhere. */
+  button {
+    cursor: pointer;
+  }
+
+  /* Chromium-only, and deliberately so: these panels are dense and the
+     default 15px scrollbar eats a visible slice of every column. */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #b3b5ba;
+    border-radius: 6px;
+    border: 2px solid var(--color-panel);
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}

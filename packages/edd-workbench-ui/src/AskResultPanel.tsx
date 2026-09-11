@@ -16,11 +16,11 @@ export interface AskResultPanelProps {
  */
 export function AskResultPanel({ result, onSelectDocument }: AskResultPanelProps) {
   return (
-    <div className="section ask-result-panel">
-      <h2 className="panel-title">Answer</h2>
-      <p className="ask-answer">{result.answer}</p>
+    <div className="mb-6 border-t border-line pt-4">
+      <h2 className="m-0 mb-2.5 text-[10.5px] font-semibold tracking-[0.08em] text-ink-soft uppercase">Answer</h2>
+      <p className="m-0 mb-2.5 text-[12.5px] leading-normal whitespace-pre-wrap">{result.answer}</p>
       {result.relevantDocuments.length > 0 && (
-        <ul className="ask-relevant-documents">
+        <ul className="m-0 flex list-none flex-col gap-1 p-0">
           {result.relevantDocuments.map((doc) => (
             <li key={doc.documentId}>
               <Button type="link" size="small" className="h-auto p-0 text-left" onClick={() => onSelectDocument(doc.documentId)}>

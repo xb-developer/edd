@@ -223,8 +223,8 @@ export function FilterPanel({
 
   return (
     <section className="min-h-0 flex-[0_0_auto] overflow-y-auto border-r border-line bg-panel px-3.5 py-4" style={style} ref={rootRef as RefObject<HTMLElement> | undefined}>
-      <div className="section">
-        <h2 className="panel-title">Search</h2>
+      <div className="mb-6">
+        <h2 className="m-0 mb-2.5 text-[10.5px] font-semibold tracking-[0.08em] text-ink-soft uppercase">Search</h2>
         <Input
           allowClear
           size="small"
@@ -242,14 +242,14 @@ export function FilterPanel({
         </Button>
         {searchError && <Alert type="warning" showIcon className="mt-1.5" message={searchError} />}
         {searchTotalHits !== null && matchingDocumentCount !== null && searchTotalHits > matchingDocumentCount && (
-          <p className="bulk-note">
+          <p className="mt-1.5 text-[11.5px] text-seal">
             Showing first {matchingDocumentCount} of {searchTotalHits} matches — narrow your search
           </p>
         )}
       </div>
 
-      <div className="section">
-        <h2 className="panel-title">Question</h2>
+      <div className="mb-6">
+        <h2 className="m-0 mb-2.5 text-[10.5px] font-semibold tracking-[0.08em] text-ink-soft uppercase">Question</h2>
         <Input.TextArea
           rows={3}
           size="small"
@@ -271,10 +271,10 @@ export function FilterPanel({
         </div>
       </div>
 
-      <div className="section">
-        <h2 className="panel-title">Tag Filter</h2>
+      <div className="mb-6">
+        <h2 className="m-0 mb-2.5 text-[10.5px] font-semibold tracking-[0.08em] text-ink-soft uppercase">Tag Filter</h2>
         {allTags.length === 0 ? (
-          <p className="empty-note">No tags configured for this matter.</p>
+          <p className="px-0.5 py-1 text-[11.5px] italic text-ink-soft">No tags configured for this matter.</p>
         ) : (
           <>
             <Segmented
@@ -288,13 +288,13 @@ export function FilterPanel({
                 { label: "Match any", value: "any" },
               ]}
             />
-            <div className="tag-filter-list">
+            <div className="flex flex-col gap-0.5">
               {allTags.map((tag) => (
-                <label key={tag.id} className="tag-filter-row">
+                <label key={tag.id} className="flex cursor-pointer items-center gap-[7px] rounded px-1.5 py-[5px] text-xs hover:bg-slate-soft">
                   <Checkbox checked={selectedTagIds.includes(tag.id)} onChange={() => onToggleTagId(tag.id)} />
-                  <span className="tag-dot" style={{ background: tag.color ?? "var(--ink-soft)" }} />
+                  <span className="h-[7px] w-[7px] flex-none rounded-full" style={{ background: tag.color ?? "var(--ink-soft)" }} />
                   <span>{tag.name}</span>
-                  <span className="cnt">{countForTag(tag.id)}</span>
+                  <span className="ml-auto font-mono text-[10.5px] text-ink-soft">{countForTag(tag.id)}</span>
                 </label>
               ))}
             </div>
@@ -307,8 +307,8 @@ export function FilterPanel({
         )}
       </div>
 
-      <div className="section">
-        <h2 className="panel-title">Processing Filter</h2>
+      <div className="mb-6">
+        <h2 className="m-0 mb-2.5 text-[10.5px] font-semibold tracking-[0.08em] text-ink-soft uppercase">Processing Filter</h2>
         <Select<IngestStatusFilter>
           size="small"
           className="mb-1.5 w-full"
@@ -321,30 +321,30 @@ export function FilterPanel({
           }))}
         />
         <RetryIngestButton api={api} matterId={matterId} documentIds={failedSelectedDocumentIds} onRetried={onDocumentsChanged} />
-        <p className="export-hint">
+        <p className="mt-0.5 text-[10.5px] leading-normal text-ink-soft">
           {failedSelectedDocumentIds.length === 0
             ? "Check failed documents in the table to enable retry."
             : `Retries ingest for the ${failedSelectedDocumentIds.length} currently checked failed document${failedSelectedDocumentIds.length === 1 ? "" : "s"}.`}
         </p>
       </div>
 
-      <div className="section">
-        <h2 className="panel-title">Export</h2>
+      <div className="mb-6">
+        <h2 className="m-0 mb-2.5 text-[10.5px] font-semibold tracking-[0.08em] text-ink-soft uppercase">Export</h2>
         <ExportButtons api={api} matterId={matterId} selectedDocumentIds={selectedDocumentIds} />
-        <p className="export-hint">
+        <p className="mt-0.5 text-[10.5px] leading-normal text-ink-soft">
           {selectedDocumentIds.size === 0
             ? "Check documents in the table to enable export."
             : `Exports the ${selectedDocumentIds.size} currently checked document${selectedDocumentIds.size === 1 ? "" : "s"} — as a zip (Export documents) or a metadata CSV (Export properties).`}
         </p>
       </div>
 
-      <div className="section">
-        <h2 className="panel-title">Access</h2>
-        {accessError && <p className="bulk-note">{accessError}</p>}
+      <div className="mb-6">
+        <h2 className="m-0 mb-2.5 text-[10.5px] font-semibold tracking-[0.08em] text-ink-soft uppercase">Access</h2>
+        {accessError && <p className="mt-1.5 text-[11.5px] text-seal">{accessError}</p>}
         {!members ? (
-          <p className="empty-note">Loading…</p>
+          <p className="px-0.5 py-1 text-[11.5px] italic text-ink-soft">Loading…</p>
         ) : (
-          <table className="access-list">
+          <table className="w-full border-collapse text-xs [&_tr:not(:last-child)]:border-b [&_tr:not(:last-child)]:border-line">
             <tbody>
               {members.map((member) => {
                 // The creator's own row — server-enforced too (matterMembers.ts's
@@ -353,9 +353,9 @@ export function FilterPanel({
                 const isCreatorRemovingSelf = member.userId === currentUserId && currentUserId === matterCreatedBy;
                 return (
                   <tr key={member.userId}>
-                    <td className="access-list-name">{member.name ?? member.email}</td>
+                    <td className="px-1 py-1.5 text-ink">{member.name ?? member.email}</td>
                     {canManageAccess && (
-                      <td className="access-list-remove">
+                      <td className="w-5 text-right">
                         <Button
                           type="text"
                           size="small"
@@ -376,7 +376,7 @@ export function FilterPanel({
                   <tr>
                     <td colSpan={2}>
                       <select
-                        className="access-list-select"
+                        className="mt-1.5 w-full rounded border border-line px-1.5 py-[5px] text-xs"
                         autoFocus
                         defaultValue=""
                         disabled={!candidates || busyUserId !== null}

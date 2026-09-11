@@ -86,7 +86,7 @@ function AppShell() {
   if (isLoading) {
     return (
       <div className="flex h-screen items-center justify-center bg-paper">
-        <p className="empty-note">Loading…</p>
+        <p className="px-0.5 py-1 text-[11.5px] italic text-ink-soft">Loading…</p>
       </div>
     );
   }
@@ -126,7 +126,7 @@ function AppShell() {
               </span>
               <h1 className="m-0 text-base font-semibold">Collate</h1>
             </div>
-            <p className="empty-note" style={{ marginBottom: 18 }}>
+            <p className="px-0.5 py-1 text-[11.5px] italic text-ink-soft mb-[18px]">
               {message}
             </p>
             <button
@@ -142,7 +142,7 @@ function AppShell() {
     }
     return (
       <div className="flex h-screen items-center justify-center bg-paper">
-        <p className="empty-note">Signing you in…</p>
+        <p className="px-0.5 py-1 text-[11.5px] italic text-ink-soft">Signing you in…</p>
       </div>
     );
   }
@@ -177,14 +177,14 @@ function ViewerWindowShell({ matterId, documentId, sessionId }: { matterId: stri
   if (isLoading) {
     return (
       <div className="flex h-screen items-center justify-center bg-paper">
-        <p className="empty-note">Loading…</p>
+        <p className="px-0.5 py-1 text-[11.5px] italic text-ink-soft">Loading…</p>
       </div>
     );
   }
   if (!isAuthenticated) {
     return (
       <div className="flex h-screen items-center justify-center bg-paper">
-        <p className="preview-unsupported">Session expired — close this window and reopen the viewer from the main application.</p>
+        <p className="rounded border border-dashed border-line p-6 text-center text-xs text-ink-soft">Session expired — close this window and reopen the viewer from the main application.</p>
       </div>
     );
   }

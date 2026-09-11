@@ -35,8 +35,8 @@ export function NoticeDialog({ onClose }: NoticeDialogProps) {
 
   return (
     <Modal open title="Third-party notices" onCancel={onClose} onOk={onClose} footer={null} width={720} aria-label="Third-party notices">
-      {error && <p className="bulk-note">{error}</p>}
-      {!error && !text && <p className="empty-note">Loading…</p>}
+      {error && <p className="mt-1.5 text-[11.5px] text-seal">{error}</p>}
+      {!error && !text && <p className="px-0.5 py-1 text-[11.5px] italic text-ink-soft">Loading…</p>}
       {/* max-h-[60vh] rather than a full-height panel: the notices are long,
           and the modal should scroll its own body, not the page. */}
       {text && <pre className="my-2 max-h-[60vh] overflow-y-auto text-[13px] whitespace-pre-wrap">{text}</pre>}

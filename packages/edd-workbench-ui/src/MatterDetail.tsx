@@ -496,13 +496,13 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
     // own overflow:hidden, .table-wrap's overflow:auto) behave as intended.
     <div style={{ display: "flex", flexDirection: "column", height: "100%", width: "100%", minWidth: 0, minHeight: 0 }}>
       {dragOver && (
-        <div className="drop-overlay">
+        <div className="pointer-events-none fixed inset-0 z-[1000] flex items-center justify-center bg-[rgba(23,42,71,0.85)] text-xl font-semibold text-white">
           <span>Drop files to import</span>
         </div>
       )}
       {error && (
-        <div className="import-failures-banner">
-          <div className="import-failures-head">
+        <div className="max-h-40 overflow-y-auto border-b border-[#e6c3be] bg-seal-soft px-5 py-2.5">
+          <div className="flex items-center justify-between gap-3.5">
             <span>{error}</span>
             <Button type="text" size="small" onClick={() => setError(null)} aria-label="Dismiss">
               ×
@@ -512,14 +512,14 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
       )}
 
       {documentImport.importProgress && (
-        <div className="import-progress-banner">
-          <span className="import-progress-label">
+        <div className="flex items-center gap-3.5 border-b border-[#ead6a5] bg-amber-soft px-5 py-2">
+          <span className="flex-none whitespace-nowrap text-[11.5px] font-semibold text-[#6b4c05]">
             Importing document {documentImport.importProgress.current} of {documentImport.importProgress.total}
             {documentImport.importProgress.errors > 0 ? ` — ${documentImport.importProgress.errors} failed` : ""}
           </span>
-          <div className="import-progress-track">
+          <div className="h-1.5 flex-1 overflow-hidden rounded-[3px] border border-[#ead6a5] bg-white">
             <div
-              className="import-progress-fill"
+              className="h-full bg-seal transition-[width] duration-200 ease-out"
               style={{ width: `${(documentImport.importProgress.current / documentImport.importProgress.total) * 100}%` }}
             />
           </div>
@@ -527,16 +527,16 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
       )}
 
       {documentImport.ingestProgress && (
-        <div className="import-progress-banner">
-          <span className="import-progress-label">
+        <div className="flex items-center gap-3.5 border-b border-[#ead6a5] bg-amber-soft px-5 py-2">
+          <span className="flex-none whitespace-nowrap text-[11.5px] font-semibold text-[#6b4c05]">
             {documentImport.ingestProgress.gaveUp
               ? `${documentImport.ingestProgress.remaining} document${documentImport.ingestProgress.remaining === 1 ? "" : "s"} still processing — reload to check`
               : `Processing ${documentImport.ingestProgress.total - documentImport.ingestProgress.remaining} of ${documentImport.ingestProgress.total} document${documentImport.ingestProgress.total === 1 ? "" : "s"}…`}
             {documentImport.ingestProgress.failed > 0 ? ` — ${documentImport.ingestProgress.failed} failed` : ""}
           </span>
-          <div className="import-progress-track">
+          <div className="h-1.5 flex-1 overflow-hidden rounded-[3px] border border-[#ead6a5] bg-white">
             <div
-              className="import-progress-fill"
+              className="h-full bg-seal transition-[width] duration-200 ease-out"
               style={{
                 width: `${((documentImport.ingestProgress.total - documentImport.ingestProgress.remaining) / documentImport.ingestProgress.total) * 100}%`,
               }}
@@ -551,8 +551,8 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
       )}
 
       {documentImport.importFailures && (
-        <div className="import-failures-banner">
-          <div className="import-failures-head">
+        <div className="max-h-40 overflow-y-auto border-b border-[#e6c3be] bg-seal-soft px-5 py-2.5">
+          <div className="flex items-center justify-between gap-3.5">
             <span>
               {documentImport.importFailures.length} file{documentImport.importFailures.length === 1 ? "" : "s"} failed to import
             </span>
@@ -560,10 +560,10 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
               ×
             </Button>
           </div>
-          <ul className="import-failures-list">
+          <ul className="m-0 mt-2 list-none p-0 text-[11.5px] leading-[1.7] [&_li]:truncate">
             {documentImport.importFailures.map((failure, i) => (
               <li key={i}>
-                <span className="fname">{failure.filename}</span> <span className="muted">— {failure.error}</span>
+                <span className="fname">{failure.filename}</span> <span className="text-ink-soft">— {failure.error}</span>
               </li>
             ))}
           </ul>
@@ -571,7 +571,7 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
       )}
 
       {!documents || !filteredDocuments || !sortedDocuments ? (
-        <p className="empty-note" style={{ padding: 16 }}>
+        <p className="px-0.5 py-1 text-[11.5px] italic text-ink-soft" style={{ padding: 16 }}>
           Loading…
         </p>
       ) : (
@@ -607,13 +607,13 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
           <div className={`${COL_RESIZE_HANDLE}${leftResize.dragging ? " bg-navy-soft" : ""}`} {...leftResize.handleProps} />
 
           <section className="flex min-w-[200px] flex-[1_1_0] flex-col overflow-hidden">
-            <div className="table-toolbar">
-              <span className="count">
+            <div className="flex items-center gap-2.5 border-b border-line bg-panel px-4 py-2.5">
+              <span className="font-mono text-[11.5px] text-ink-soft">
                 DOCUMENTS {documents.length} FILTERED {filteredDocuments.length} CHECKED {checkedDocumentIds.size} SIZE{" "}
                 {formatSize(totalFilteredSizeBytes)}
               </span>
               {checkedDocumentIds.size > 0 && (
-                <span className="count">
+                <span className="font-mono text-[11.5px] text-ink-soft">
                   {hiddenCheckedCount > 0 ? `${hiddenCheckedCount} not shown by current filter` : null}
                   <Button type="text" size="small" onClick={() => setCheckedDocumentIds(new Set())}>
                     Clear
@@ -678,10 +678,12 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
               onToggleSelectAll={() => toggleSelectAllVisible(filteredDocuments)}
               onDelete={handleDeleteDocument}
               emptyState={
-                <div className="empty-state">
-                  <div className="glyph">000000</div>
-                  <h3>{documents.length === 0 ? "No documents yet." : "No documents match the current filters."}</h3>
-                  <p>
+                <div className="flex h-full w-full flex-col items-center justify-center p-10 text-center text-ink-soft">
+                  <div className="mb-2.5 font-mono text-[34px] text-line">000000</div>
+                  <h3 className="m-0 mb-1.5 text-sm text-ink">
+                    {documents.length === 0 ? "No documents yet." : "No documents match the current filters."}
+                  </h3>
+                  <p className="m-0 mb-3.5 max-w-[280px] text-xs leading-relaxed">
                     {documents.length === 0
                       ? "Documents uploaded to this matter will appear here once ingested."
                       : "Try clearing the search or tag filter."}
@@ -695,8 +697,8 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
 
           <section className="flex min-h-0 flex-[0_0_auto] flex-col overflow-hidden border-l border-line bg-panel" style={{ flexBasis: rightResize.size }} ref={rightResize.targetRef as React.RefObject<HTMLElement>}>
             {selectedDocument && (
-              <div className="pane-title-row">
-                <h2 className="panel-title">Preview</h2>
+              <div className="flex flex-none items-center justify-between gap-2 border-b border-line bg-panel px-4 pt-2.5 pb-[9px]">
+                <h2 className="m-0 mb-2.5 text-[10.5px] font-semibold tracking-[0.08em] text-ink-soft uppercase">Preview</h2>
                 {viewerWindow.state === "docked" ? (
                   // "Float on top" (PiP) button removed from the UI — the
                   // underlying popOutPiP/pipSupported functionality in
@@ -713,18 +715,18 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
               </div>
             )}
             {viewerWindow.popOutError && <Alert type="warning" showIcon className="mb-2" message={viewerWindow.popOutError} />}
-            <div className="panel-body" style={{ flexBasis: rowResize.size, flexGrow: 0, flexShrink: 0 }} ref={rowResize.targetRef as React.RefObject<HTMLDivElement>}>
+            <div className="min-h-0 flex-1 overflow-y-auto p-4" style={{ flexBasis: rowResize.size, flexGrow: 0, flexShrink: 0 }} ref={rowResize.targetRef as React.RefObject<HTMLDivElement>}>
               {!selectedDocument ? (
-                <p className="no-selection">Select a document to preview it.</p>
+                <p className="p-4 text-center text-xs italic text-ink-soft">Select a document to preview it.</p>
               ) : viewerWindow.state === "open" ? (
                 <>
                   <DocumentPropertiesPanel document={selectedDocument} />
-                  <p className="no-selection">Viewer opened in a separate window.</p>
+                  <p className="p-4 text-center text-xs italic text-ink-soft">Viewer opened in a separate window.</p>
                 </>
               ) : viewerWindow.state === "pip" ? (
                 <>
                   <DocumentPropertiesPanel document={selectedDocument} />
-                  <p className="no-selection">Viewer floating in picture-in-picture.</p>
+                  <p className="p-4 text-center text-xs italic text-ink-soft">Viewer floating in picture-in-picture.</p>
                 </>
               ) : (
                 <>
@@ -746,8 +748,13 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
                 // what already exists at open time, so it can't cover this.
                 <StyleProvider container={viewerWindow.pipContainer.ownerDocument.head}>
                   <ConfigProvider theme={antdTheme} getPopupContainer={() => viewerWindow.pipContainer!}>
-                    <DocumentPropertiesPanel document={selectedDocument} />
-                    <DocumentViewer api={api} matterId={matterId} document={selectedDocument} />
+                    {/* The column the preview stretches inside — in the
+                        docked pane this came from the panel-body wrapper,
+                        which the PiP tree doesn't render. */}
+                    <div className="flex min-h-0 flex-1 flex-col">
+                      <DocumentPropertiesPanel document={selectedDocument} />
+                      <DocumentViewer api={api} matterId={matterId} document={selectedDocument} />
+                    </div>
                   </ConfigProvider>
                 </StyleProvider>,
                 viewerWindow.pipContainer,

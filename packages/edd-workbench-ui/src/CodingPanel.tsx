@@ -148,9 +148,9 @@ export function CodingPanel({
   }
 
   return (
-    <div className="split-pane">
-      <div className="pane-title-row">
-        <h2 className="panel-title">{isBulkMode ? `Applying to ${bulkSelectedDocumentIds.size} selected document${bulkSelectedDocumentIds.size === 1 ? "" : "s"}` : "Coding"}</h2>
+    <div className="flex min-h-[60px] flex-1 flex-col overflow-hidden">
+      <div className="flex flex-none items-center justify-between gap-2 border-b border-line bg-panel px-4 pt-2.5 pb-[9px]">
+        <h2 className="m-0 mb-2.5 text-[10.5px] font-semibold tracking-[0.08em] text-ink-soft uppercase">{isBulkMode ? `Applying to ${bulkSelectedDocumentIds.size} selected document${bulkSelectedDocumentIds.size === 1 ? "" : "s"}` : "Coding"}</h2>
         {isBulkMode ? (
           <Button
             size="small"
@@ -184,12 +184,12 @@ export function CodingPanel({
           </Space.Compact>
         )}
       </div>
-      <div className="panel-body">
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {error && <Alert type="error" showIcon className="mb-2" message={error} />}
         {!error &&
           tagSets.map((tagSet) => (
-            <div key={tagSet.id} className="section">
-              <h2 className="panel-title">{tagSet.name}</h2>
+            <div key={tagSet.id} className="mb-6">
+              <h2 className="m-0 mb-2.5 text-[10.5px] font-semibold tracking-[0.08em] text-ink-soft uppercase">{tagSet.name}</h2>
               <div className="mb-3.5 flex flex-wrap gap-1.5">
                 {tagSet.tags.map((tag) => {
                   if (!isBulkMode) {
@@ -233,9 +233,9 @@ export function CodingPanel({
               </div>
             </div>
           ))}
-        {!error && tagSets.length === 0 && <p className="empty-note">No tag sets configured for this matter.</p>}
-        <div className="section">
-          <h2 className="panel-title">Custom code</h2>
+        {!error && tagSets.length === 0 && <p className="px-0.5 py-1 text-[11.5px] italic text-ink-soft">No tag sets configured for this matter.</p>}
+        <div className="mb-6">
+          <h2 className="m-0 mb-2.5 text-[10.5px] font-semibold tracking-[0.08em] text-ink-soft uppercase">Custom code</h2>
           <Space.Compact size="small" className="w-full">
             <Input
               placeholder="New code name…"

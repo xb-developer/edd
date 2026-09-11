@@ -94,26 +94,26 @@ export function WorkerHealthBar({ api, matterId }: WorkerHealthBarProps) {
     };
   }, [api]);
 
-  if (error) return <span className="worker-health-bar muted">Worker status unavailable</span>;
+  if (error) return <span className="flex gap-2 text-[11px] text-white/75">Worker status unavailable</span>;
   if (!status) return null;
 
   const searchMismatch = searchHealth && searchHealth.postgresDocCount - searchHealth.esDocCount > SEARCH_HEALTH_MISMATCH_THRESHOLD;
 
   return (
-    <span className="worker-health-bar">
+    <span className="flex gap-2 text-[11px] text-white/75">
       {status.queues.map((queue) => {
         const ageSeconds = secondsAgo(queue.heartbeat?.lastTickAt ?? null);
         const stalled = ageSeconds === null || ageSeconds * 1000 > STALE_TICK_MS;
         const working = queue.heartbeat?.processingStartedAt != null;
         return (
-          <span key={queue.name} className={`worker-health-chip${stalled ? " stalled" : ""}`} title={queue.heartbeat?.queueName}>
+          <span key={queue.name} className={`whitespace-nowrap rounded border px-2 py-[3px]${stalled ? " border-seal text-seal" : " border-white/30"}`} title={queue.heartbeat?.queueName}>
             {queue.name}: {stalled ? "stalled" : working ? "working" : "idle"} · {queue.queued} queued · {queue.ok} ok / {queue.failed} failed
           </span>
         );
       })}
       {searchHealth && (
         <span
-          className={`worker-health-chip${searchMismatch ? " stalled" : ""}`}
+          className={`whitespace-nowrap rounded border px-2 py-[3px]${searchMismatch ? " border-seal text-seal" : " border-white/30"}`}
           title="Elasticsearch document count vs. Postgres's own ready/failed document count — a small gap is normal async-indexing lag; a large one usually means reindexSearch.ts needs re-running."
         >
           search: {searchHealth.esDocCount}/{searchHealth.postgresDocCount} indexed

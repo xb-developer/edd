@@ -69,8 +69,9 @@ async function buildDocumentsZip(client: PoolClient, orgId: string, job: ExportJ
   // document's displayed number can't be known in isolation.
   const docs = await client.query<DocumentForZipRow>(
     `${MATTER_DOCUMENT_TREE_CTE}
-     SELECT n.display_guid_number AS guid_number, n.extension, n.s3_key
+     SELECT n.display_guid_number AS guid_number, d.extension, d.s3_key
      FROM numbered n
+     JOIN documents d ON d.id = n.id
      WHERE n.id = ANY($2::uuid[])
      ORDER BY n.sort_path`,
     [job.matter_id, job.document_ids],
@@ -134,16 +135,17 @@ async function buildPropertiesCsv(client: PoolClient, orgId: string, job: Export
   const rows = await client.query<DocumentForCsvRow>(
     `${MATTER_DOCUMENT_TREE_CTE}
      SELECT n.display_guid_number AS guid_number, f.display_guid_number AS family_guid_number,
-            n.original_filename, n.content_type_detected,
-            n.size_bytes, n.doc_date, n.file_modified_at, n.author, n.metadata,
+            d.original_filename, d.content_type_detected,
+            d.size_bytes, d.doc_date, d.file_modified_at, d.author, d.metadata,
             COALESCE(string_agg(t.name, ', ' ORDER BY t.name), '') AS tags
      FROM numbered n
+     JOIN documents d ON d.id = n.id
      LEFT JOIN numbered f ON f.id = n.family_document_id
      LEFT JOIN document_tags dt ON dt.document_id = n.id
      LEFT JOIN tags t ON t.id = dt.tag_id
      WHERE n.id = ANY($2::uuid[])
-     GROUP BY n.id, n.display_guid_number, f.display_guid_number, n.original_filename, n.content_type_detected,
-              n.size_bytes, n.doc_date, n.file_modified_at, n.author, n.metadata, n.sort_path
+     GROUP BY n.id, n.display_guid_number, f.display_guid_number, d.original_filename, d.content_type_detected,
+              d.size_bytes, d.doc_date, d.file_modified_at, d.author, d.metadata, n.sort_path
      ORDER BY n.sort_path`,
     [job.matter_id, job.document_ids],
   );

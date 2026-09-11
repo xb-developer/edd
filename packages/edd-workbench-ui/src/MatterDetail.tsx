@@ -444,7 +444,11 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
 
   useEffect(refreshTagState, [matterId]);
 
-  const tagsById = new Map(tagSets.flatMap((tagSet) => tagSet.tags).map((tag) => [tag.id, tag]));
+  // Memoized on tagSets, not rebuilt per render — this is a flatMap plus a
+  // Map build over every tag in the matter, and it ran on every pointermove
+  // during a panel/column drag (see useDragResize/useColumnWidths) purely
+  // because some unrelated piece of state changed.
+  const tagsById = useMemo(() => new Map(tagSets.flatMap((tagSet) => tagSet.tags).map((tag) => [tag.id, tag])), [tagSets]);
 
   async function handleDeleteDocument(doc: DocumentDTO) {
     // Checks parentGuid (the direct-parent link), not familyGuid — familyGuid
@@ -719,7 +723,7 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
             matchMode={tagMatchMode}
             onMatchModeChange={setTagMatchMode}
             onClearTagFilter={() => setSelectedTagIds([])}
-            selectedDocumentIds={Array.from(checkedDocumentIds)}
+            selectedDocumentIds={checkedDocumentIds}
             documents={documents}
             statusFilter={statusFilter}
             onStatusFilterChange={setStatusFilter}
@@ -1118,7 +1122,7 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
                   api={api}
                   matterId={matterId}
                   documentId={selectedDocument.documentId}
-                  bulkSelectedDocumentIds={Array.from(checkedDocumentIds)}
+                  bulkSelectedDocumentIds={checkedDocumentIds}
                   onClearBulkSelection={() => setCheckedDocumentIds(new Set())}
                   appliedTagsByDocument={appliedTagsByDocument}
                   tagSets={tagSets}

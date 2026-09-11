@@ -162,17 +162,32 @@ export async function expandMembers(params: {
   let succeeded = 0;
   if (params.depth >= MAX_CONTAINER_EXPANSION_DEPTH) return { succeeded, failures, depthCapped: true };
 
-  // One query up front, then an in-memory running total across this
-  // container's own (sequential) member loop — matches documents.ts's own
-  // init-upload quota check exactly, so two members inside the same
-  // container count against each other the same way two files in the same
-  // upload batch do. A member that doesn't fit gets no document row, no S3
-  // object, and no re-enqueue — same as any other per-member failure, just
-  // recorded with a quota-specific message rather than a thrown error.
-  let usedBytes = await withOrgSession(params.orgId, (client) => getMatterStorageUsedBytes(client, params.matterId));
+  // Read once, on the first member that actually needs it, then kept as an
+  // in-memory running total across this container's own (sequential) member
+  // loop — matches documents.ts's own init-upload quota check exactly, so
+  // two members inside the same container count against each other the same
+  // way two files in the same upload batch do. A member that doesn't fit
+  // gets no document row, no S3 object, and no re-enqueue — same as any
+  // other per-member failure, just recorded with a quota-specific message
+  // rather than a thrown error.
+  //
+  // Deferred rather than read up front because expandMembers is called once
+  // per eml/msg AND once per PST message — overwhelmingly with zero members
+  // — while the read itself is a matter-wide `SUM(size_bytes)` in its own
+  // transaction. Up front, a 10,000-message PST paid 10,000 aggregate scans
+  // over a table growing to 10,000 rows (plus 10,000 BEGIN/COMMIT cycles)
+  // purely to expand nothing. Deferring costs no atomicity that existed
+  // before: this read is NOT in the same transaction as the inserts it
+  // gates — each member opens its own withOrgSession below — so it was
+  // already the soft business-rule cap getMatterStorageUsedBytes's own
+  // comment describes, never a strictly atomic one.
+  let usedBytes: number | null = null;
 
   for await (const member of params.members) {
     if (member.content.byteLength === 0) continue;
+    if (usedBytes === null) {
+      usedBytes = await withOrgSession(params.orgId, (client) => getMatterStorageUsedBytes(client, params.matterId));
+    }
     if (usedBytes + member.content.byteLength > MATTER_STORAGE_QUOTA_BYTES) {
       failures.push({ filename: member.filename, error: matterQuotaExceededMessage(member.filename) });
       continue;

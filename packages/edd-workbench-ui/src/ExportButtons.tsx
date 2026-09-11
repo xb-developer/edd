@@ -5,7 +5,8 @@ export interface ExportButtonsProps {
   api: ApiClient;
   matterId: string;
   /** The bulk-select checkbox column's checked ids — both buttons are scoped to exactly this set, never "everything in the matter" (see FilterPanel's own comment on this same prop). */
-  selectedDocumentIds: string[];
+  /** The checked set itself — materialized to an array only in the click handler below, not on every render. */
+  selectedDocumentIds: ReadonlySet<string>;
 }
 
 const POLL_INTERVAL_MS = 1500;
@@ -53,7 +54,7 @@ export function ExportButtons({ api, matterId, selectedDocumentIds }: ExportButt
     setState({ inFlight: true, error: null });
 
     try {
-      const { exportId } = await api.requestExport(matterId, kind, selectedDocumentIds);
+      const { exportId } = await api.requestExport(matterId, kind, Array.from(selectedDocumentIds));
 
       // Plain poll loop, no backoff — export jobs are short-lived enough
       // (build plan §G) that a fixed 1.5s interval is all this needs.
@@ -98,7 +99,7 @@ export function ExportButtons({ api, matterId, selectedDocumentIds }: ExportButt
             key={kind}
             type="button"
             className="export-btn"
-            disabled={selectedDocumentIds.length === 0 || state.inFlight}
+            disabled={selectedDocumentIds.size === 0 || state.inFlight}
             onClick={() => runExport(kind)}
           >
             <span className="ico">▤</span> {state.inFlight ? "Exporting…" : KIND_LABEL[kind]}

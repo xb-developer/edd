@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ApiClient } from "./api";
 import type { TagSetDTO } from "./types";
 
@@ -7,7 +7,8 @@ export interface CodingPanelProps {
   matterId: string;
   documentId: string;
   /** Independent of `documentId` — the bulk-select checkbox column's checked ids. Non-empty switches the whole panel into bulk-apply mode; `documentId` (the single-preview target) is ignored while that's the case. */
-  bulkSelectedDocumentIds: string[];
+  /** The checked set itself, NOT a fresh `Array.from(...)` per render — a new array every render would change identity every render and silently defeat `bulkAppliedCountByTagId`'s memo below (same reason FilterPanel takes the Set). */
+  bulkSelectedDocumentIds: ReadonlySet<string>;
   onClearBulkSelection: () => void;
   /** Lifted to MatterDetail (shared with the results table's own tag chips) — needed here so bulk mode can invert each selected document's OWN current state for a tag, not force every document to the same state. */
   appliedTagsByDocument: Record<string, string[]>;
@@ -47,7 +48,19 @@ export function CodingPanel({
   const [customTagName, setCustomTagName] = useState("");
   const [creatingTag, setCreatingTag] = useState(false);
 
-  const isBulkMode = bulkSelectedDocumentIds.length > 0;
+  const isBulkMode = bulkSelectedDocumentIds.size > 0;
+
+  // One pass over the checked documents building tagId → count, rather than
+  // re-filtering the whole selection inside the tag render loop below once
+  // per tag — that was O(tags × checked) on EVERY render (50 codes × 5,000
+  // checked documents ≈ 250,000 comparisons), not just when either changed.
+  const bulkAppliedCountByTagId = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const id of bulkSelectedDocumentIds) {
+      for (const tagId of appliedTagsByDocument[id] ?? []) counts.set(tagId, (counts.get(tagId) ?? 0) + 1);
+    }
+    return counts;
+  }, [bulkSelectedDocumentIds, appliedTagsByDocument]);
 
   useEffect(() => {
     if (isBulkMode) return;
@@ -67,8 +80,11 @@ export function CodingPanel({
         // batch with mixed existing state. Selection is deliberately not
         // cleared afterward, so a second code can be applied to the same
         // batch immediately.
-        const toRemove = bulkSelectedDocumentIds.filter((id) => (appliedTagsByDocument[id] ?? []).includes(tagId));
-        const toApply = bulkSelectedDocumentIds.filter((id) => !(appliedTagsByDocument[id] ?? []).includes(tagId));
+        const toRemove: string[] = [];
+        const toApply: string[] = [];
+        for (const id of bulkSelectedDocumentIds) {
+          ((appliedTagsByDocument[id] ?? []).includes(tagId) ? toRemove : toApply).push(id);
+        }
         await Promise.all([
           toRemove.length > 0 ? api.removeTag(matterId, toRemove, tagId) : null,
           toApply.length > 0 ? api.applyTag(matterId, toApply, tagId) : null,
@@ -108,7 +124,7 @@ export function CodingPanel({
   return (
     <div className="split-pane">
       <div className="pane-title-row">
-        <h2 className="panel-title">{isBulkMode ? `Applying to ${bulkSelectedDocumentIds.length} selected document${bulkSelectedDocumentIds.length === 1 ? "" : "s"}` : "Coding"}</h2>
+        <h2 className="panel-title">{isBulkMode ? `Applying to ${bulkSelectedDocumentIds.size} selected document${bulkSelectedDocumentIds.size === 1 ? "" : "s"}` : "Coding"}</h2>
         {isBulkMode ? (
           <button
             type="button"
@@ -177,8 +193,8 @@ export function CodingPanel({
                   // (some but not all of the batch already has this code)
                   // needs to look visibly different from a clean "none of
                   // them do" so the click's real effect isn't a surprise.
-                  const appliedCount = bulkSelectedDocumentIds.filter((id) => (appliedTagsByDocument[id] ?? []).includes(tag.id)).length;
-                  const bulkState = appliedCount === 0 ? "" : appliedCount === bulkSelectedDocumentIds.length ? " on" : " mixed";
+                  const appliedCount = bulkAppliedCountByTagId.get(tag.id) ?? 0;
+                  const bulkState = appliedCount === 0 ? "" : appliedCount === bulkSelectedDocumentIds.size ? " on" : " mixed";
                   return (
                     <button
                       key={tag.id}

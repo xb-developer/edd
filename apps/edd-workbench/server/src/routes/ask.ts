@@ -80,9 +80,10 @@ askRouter.post("/", async (req: Request<{ matterId: string }>, res, next) => {
       client.query<RetrievedChunkRow>(
         `${MATTER_DOCUMENT_TREE_CTE}
          SELECT dc.document_id, dc.text, dc.embedding <=> $2::vector AS distance,
-                n.display_guid_number AS guid_number, n.original_filename
+                n.display_guid_number AS guid_number, d.original_filename
          FROM document_chunks dc
          JOIN numbered n ON n.id = dc.document_id
+         JOIN documents d ON d.id = dc.document_id
          WHERE dc.matter_id = $1
          ORDER BY dc.embedding <=> $2::vector
          LIMIT $3`,

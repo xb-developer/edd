@@ -88,9 +88,10 @@ interface DocumentRow {
 // on which columns are actually selected.
 const DOCUMENT_SELECT = `
   ${MATTER_DOCUMENT_TREE_CTE}
-  SELECT n.*, n.display_guid_number AS guid_number,
+  SELECT d.*, n.display_guid_number AS guid_number,
          p.display_guid_number AS parent_guid_number, f.display_guid_number AS family_guid_number
   FROM numbered n
+  JOIN documents d ON d.id = n.id
   LEFT JOIN numbered p ON p.id = n.parent_document_id
   LEFT JOIN numbered f ON f.id = n.family_document_id
 `;

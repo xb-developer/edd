@@ -45,7 +45,8 @@ export interface FilterPanelProps {
   onMatchModeChange: (mode: "all" | "any") => void;
   onClearTagFilter: () => void;
   /** The bulk-select checkbox column's checked ids (MatterDetail's `checkedDocumentIds`) — both exports are scoped to exactly this set, never "everything in the matter." */
-  selectedDocumentIds: string[];
+  /** The checked set itself, NOT a copy — passing `Array.from(...)` here made every consumer below O(selected) per render, and the `.includes` on line ~118 O(documents × selected). It's already a Set upstream (MatterDetail's checkedDocumentIds); keep it one. */
+  selectedDocumentIds: ReadonlySet<string>;
   /** The matter's full, unfiltered document list — needed here (not just the already-filtered rows the table shows) so status counts reflect the whole matter, same as tag counts already do via appliedTagsByDocument. */
   documents: DocumentDTO[];
   statusFilter: IngestStatusFilter;
@@ -115,7 +116,7 @@ export function FilterPanel({
   // (e.g. spanning failed + ready) silently narrows to just the failed
   // ones rather than 400ing the whole request, since the server enforces
   // "every id must be failed" as a real safety check, not a UX hint.
-  const failedSelectedDocumentIds = documents.filter((d) => selectedDocumentIds.includes(d.documentId) && d.ingestStatus === "failed").map((d) => d.documentId);
+  const failedSelectedDocumentIds = documents.filter((d) => selectedDocumentIds.has(d.documentId) && d.ingestStatus === "failed").map((d) => d.documentId);
 
   const [members, setMembers] = useState<MatterMemberDTO[] | null>(null);
   const [candidates, setCandidates] = useState<MatterMemberCandidateDTO[] | null>(null);
@@ -310,9 +311,9 @@ export function FilterPanel({
         <h2 className="panel-title">Export</h2>
         <ExportButtons api={api} matterId={matterId} selectedDocumentIds={selectedDocumentIds} />
         <p className="export-hint">
-          {selectedDocumentIds.length === 0
+          {selectedDocumentIds.size === 0
             ? "Check documents in the table to enable export."
-            : `Exports the ${selectedDocumentIds.length} currently checked document${selectedDocumentIds.length === 1 ? "" : "s"} — as a zip (Export documents) or a metadata CSV (Export properties).`}
+            : `Exports the ${selectedDocumentIds.size} currently checked document${selectedDocumentIds.size === 1 ? "" : "s"} — as a zip (Export documents) or a metadata CSV (Export properties).`}
         </p>
       </div>
 

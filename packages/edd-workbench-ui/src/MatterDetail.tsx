@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ConfigProvider } from "antd";
 import { StyleProvider } from "@ant-design/cssinjs";
 import { antdTheme } from "./antdTheme";
-import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import type { PointerEvent as ReactPointerEvent } from "react";
 import type { ApiClient } from "./api";
 import type { DocumentDTO, TagSetDTO, AskResultDTO } from "./types";
 import { DocumentViewer } from "./DocumentViewer";
@@ -12,9 +12,10 @@ import { AskResultPanel } from "./AskResultPanel";
 import { FilterPanel, type IngestStatusFilter } from "./FilterPanel";
 import { DocumentPropertiesPanel } from "./DocumentPropertiesPanel";
 import { useViewerWindow } from "./viewer-window/useViewerWindow";
+import { DocumentTable } from "./DocumentTable";
 import { useDocumentDetail } from "./useDocumentDetail";
 import { useDocumentImport } from "./import/useDocumentImport";
-import { formatSize, formatDate, displayFilename, stripExtension } from "./format";
+import { formatSize } from "./format";
 import { sortDocuments, type SortableColumn, type SortDirection } from "./sortDocuments";
 import { ConfirmDialog } from "./ConfirmDialog";
 
@@ -27,13 +28,6 @@ export interface MatterDetailProps {
   currentUserId: string;
   matterCreatedBy: string | null;
 }
-
-const INGEST_STATUS_COLORS: Record<DocumentDTO["ingestStatus"], string> = {
-  pending: "#5B6272",
-  processing: "#B4780C",
-  ready: "#1F2A44",
-  failed: "#A6362C",
-};
 
 /**
  * Hand-rolled drag-to-resize via Pointer Capture, matching the POC exactly
@@ -101,209 +95,6 @@ function useDragResize(initial: number, min: number, max: number, axis: "x" | "y
   };
 }
 
-type DocumentColumnKey =
-  | "guid"
-  | "familyGuid"
-  | "originalFilename"
-  | "extension"
-  | "sizeBytes"
-  | "docDate"
-  | "author"
-  | "contentModifiedAt"
-  | "toAddresses"
-  | "ccAddresses"
-  | "tags";
-
-// Preferred widths for every resizable column EXCEPT filename — filename is
-// the one column that absorbs whatever space is actually available (see
-// fitToContainer below), not a fixed preference.
-const PREFERRED_COLUMN_WIDTHS: Omit<Record<DocumentColumnKey, number>, "originalFilename"> = {
-  guid: 80,
-  familyGuid: 80,
-  extension: 55,
-  sizeBytes: 70,
-  docDate: 90,
-  author: 130,
-  contentModifiedAt: 90,
-  toAddresses: 150,
-  ccAddresses: 150,
-  tags: 150,
-};
-
-const MIN_COLUMN_WIDTH = 40;
-// The two non-resizable columns (checkbox, per-row delete) — needed to
-// compute how much width is actually left for the resizable ones.
-const SELECT_CELL_WIDTH = 32;
-const CHECK_CELL_WIDTH = 32;
-
-const DEFAULT_COLUMN_WIDTHS: Record<DocumentColumnKey, number> = { ...PREFERRED_COLUMN_WIDTHS, originalFilename: 220 };
-
-/**
- * Independent per-column drag-to-resize, same Pointer Capture mechanics as
- * useDragResize above but keyed by column rather than a single dimension —
- * one shared drag ref (only one column can be dragged at a time) instead of
- * instantiating useDragResize once per column, which would mean a fixed,
- * unrollable number of hook calls for however many columns this table ends
- * up with.
- *
- * Also owns "fit the columns to the panel's actual width" — every other
- * column keeps its preferred width and the filename column absorbs
- * whatever's left over (shrinking it if necessary), so the table needs no
- * horizontal scrollbar on a fresh load regardless of screen size. This
- * auto-fit re-runs whenever the matter changes or the panel itself is
- * resized (dragging the left/right panel handles, or the browser window) —
- * but ONLY until the user manually drags a column's own resize handle, at
- * which point their explicit choice takes over and a scrollbar is the
- * expected result of a table now wider than the panel, not something to
- * silently fight by auto-shrinking things back.
- */
-function useColumnWidths(matterId: string) {
-  const [widths, setWidths] = useState<Record<DocumentColumnKey, number>>(DEFAULT_COLUMN_WIDTHS);
-  const [draggingColumn, setDraggingColumn] = useState<DocumentColumnKey | null>(null);
-  const dragRef = useRef({ column: null as DocumentColumnKey | null, startX: 0, startWidth: 0 });
-  const manuallyResizedRef = useRef(false);
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  // Live widths during a drag — same reasoning as useDragResize's
-  // liveSizeRef: `widths` state is not updated between pointerdown and
-  // pointerup, so this is the source of truth for that window.
-  const liveWidthsRef = useRef<Record<DocumentColumnKey, number>>(DEFAULT_COLUMN_WIDTHS);
-  // The <col> element per column, plus the <table> itself (whose own width
-  // is the sum of the columns) — written to directly during a drag.
-  const colRefs = useRef<Partial<Record<DocumentColumnKey, HTMLTableColElement | null>>>({});
-  const tableRef = useRef<HTMLTableElement | null>(null);
-
-  // Every path that sets widths through state must keep the live ref in
-  // step, or the next drag starts from a stale baseline (auto-fit on matter
-  // change and on panel resize both land here).
-  const applyWidths = useCallback((next: Record<DocumentColumnKey, number>) => {
-    liveWidthsRef.current = next;
-    setWidths(next);
-  }, []);
-
-  const fitToContainer = useCallback(() => {
-    if (manuallyResizedRef.current) return;
-    const container = containerRef.current;
-    if (!container) return;
-    const preferredTotal = Object.values(PREFERRED_COLUMN_WIDTHS).reduce((sum, w) => sum + w, 0);
-    // -2px slack against border/rounding so fitting exactly never itself
-    // triggers a 1px scrollbar sliver.
-    const available = container.clientWidth - SELECT_CELL_WIDTH - CHECK_CELL_WIDTH - preferredTotal - 2;
-    applyWidths({ ...PREFERRED_COLUMN_WIDTHS, originalFilename: Math.max(MIN_COLUMN_WIDTH, available) });
-  }, [applyWidths]);
-
-  // Layout effect, not a plain effect — this measures and sets widths that
-  // affect visible layout immediately; running before the browser's first
-  // paint of the new matter avoids a brief flash of the previous/default
-  // widths before snapping to the fitted ones.
-  useLayoutEffect(() => {
-    manuallyResizedRef.current = false;
-    fitToContainer();
-  }, [matterId, fitToContainer]);
-
-  useEffect(() => {
-    if (!containerRef.current) return;
-    const observer = new ResizeObserver(fitToContainer);
-    observer.observe(containerRef.current);
-    return () => observer.disconnect();
-  }, [fitToContainer]);
-
-  function startResize(column: DocumentColumnKey) {
-    return (e: ReactPointerEvent<HTMLDivElement>) => {
-      // Otherwise a plain click-without-drag on the handle would bubble up
-      // and toggle sort on the SortableTh it sits inside.
-      e.stopPropagation();
-      e.currentTarget.setPointerCapture(e.pointerId);
-      manuallyResizedRef.current = true;
-      dragRef.current = { column, startX: e.clientX, startWidth: liveWidthsRef.current[column] };
-      setDraggingColumn(column);
-    };
-  }
-  function onMove(e: ReactPointerEvent<HTMLDivElement>) {
-    const drag = dragRef.current;
-    if (!drag.column) return;
-    const next = Math.max(MIN_COLUMN_WIDTH, drag.startWidth + (e.clientX - drag.startX));
-    liveWidthsRef.current = { ...liveWidthsRef.current, [drag.column]: next };
-    // Straight to the DOM, not through setState — see useDragResize's
-    // onPointerMove for why (this one is worse: dragging a column edge
-    // re-rendered every row of the table on every pointermove).
-    const col = colRefs.current[drag.column];
-    if (col) col.style.width = `${next}px`;
-    if (tableRef.current) {
-      const total = Object.values(liveWidthsRef.current).reduce((sum, w) => sum + w, 0);
-      tableRef.current.style.width = `${SELECT_CELL_WIDTH + CHECK_CELL_WIDTH + total}px`;
-    }
-  }
-  function endResize(e: ReactPointerEvent<HTMLDivElement>) {
-    dragRef.current.column = null;
-    setDraggingColumn(null);
-    // The one render of the whole drag.
-    setWidths(liveWidthsRef.current);
-    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
-  }
-
-  return {
-    // Same live-ref-during-drag rule as useDragResize.
-    widths: draggingColumn ? liveWidthsRef.current : widths,
-    draggingColumn,
-    startResize,
-    onMove,
-    endResize,
-    containerRef,
-    colRefs,
-    tableRef,
-  };
-}
-
-interface ColumnResizeHandleProps {
-  column: DocumentColumnKey;
-  columnWidths: ReturnType<typeof useColumnWidths>;
-}
-
-function ColumnResizeHandle({ column, columnWidths }: ColumnResizeHandleProps) {
-  return (
-    <div
-      className={`col-resize-th-handle${columnWidths.draggingColumn === column ? " dragging" : ""}`}
-      onClick={(e) => e.stopPropagation()}
-      onPointerDown={columnWidths.startResize(column)}
-      onPointerMove={columnWidths.onMove}
-      onPointerUp={columnWidths.endResize}
-      onPointerCancel={columnWidths.endResize}
-    />
-  );
-}
-
-interface SortableThProps {
-  column: SortableColumn;
-  sortColumn: SortableColumn | null;
-  sortDirection: SortDirection;
-  onSort: (column: SortableColumn) => void;
-  resizeHandle: ReactNode;
-  children: ReactNode;
-}
-
-/**
- * A clickable `<th>` that toggles ascending/descending sort on its own
- * column. Every `<th>` in this table already gets `cursor: pointer` from
- * table.reg's own base styles.css rule, and a `.sorted` class is already
- * styled there too (`color: var(--navy)`) — both clearly prepared for
- * this exact feature already, just never wired up to real behavior until
- * now, so this reuses that existing class rather than inventing a new one.
- */
-function SortableTh({ column, sortColumn, sortDirection, onSort, resizeHandle, children }: SortableThProps) {
-  const active = sortColumn === column;
-  return (
-    <th
-      className={active ? "sorted" : undefined}
-      onClick={() => onSort(column)}
-      aria-sort={active ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}
-    >
-      {children}
-      {active ? (sortDirection === "asc" ? " ▲" : " ▼") : null}
-      {resizeHandle}
-    </th>
-  );
-}
-
 export function MatterDetail({ api, matterId, canManageAccess, currentUserId, matterCreatedBy }: MatterDetailProps) {
   // Updated on every render (not via its own effect) so it's already the
   // NEW matterId by the time any in-flight request for the OLD matterId
@@ -339,12 +130,6 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
   // shift-clicks stay anchored to the same starting row until the next
   // plain click.
   const [checkboxAnchorId, setCheckboxAnchorId] = useState<string | null>(null);
-  // Captured on the checkbox's own onClick (see below) so onChange — which
-  // is what actually drives the check/uncheck — knows whether shift was
-  // held. A ref, not state: this is read once, synchronously, by the very
-  // next event in the same click, never across a render.
-  const checkboxShiftKeyRef = useRef(false);
-
   function toggleChecked(documentId: string) {
     setCheckedDocumentIds((prev) => {
       const next = new Set(prev);
@@ -429,7 +214,6 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
   const leftResize = useDragResize(230, 160, 400, "x", 1);
   const rightResize = useDragResize(420, 320, 720, "x", -1);
   const rowResize = useDragResize(420, 120, 900, "y", 1);
-  const columnWidths = useColumnWidths(matterId);
 
   function refreshDocuments() {
     // Guards against an out-of-order response: switching matters (e.g. via
@@ -850,8 +634,37 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
                 }}
               />
             </div>
-            <div className="table-wrap" ref={columnWidths.containerRef}>
-              {filteredDocuments.length === 0 ? (
+            <DocumentTable
+              matterId={matterId}
+              documents={sortedDocuments}
+              filteredDocuments={filteredDocuments}
+              selectedDocumentId={selectedDocumentId}
+              checkedDocumentIds={checkedDocumentIds}
+              appliedTagsByDocument={appliedTagsByDocument}
+              tagsById={tagsById}
+              sortColumn={sortColumn}
+              sortDirection={sortDirection}
+              onSort={toggleSort}
+              onSelect={(documentId) => {
+                // "Selected" = previewed in the right-hand pane. Clicking
+                // anywhere on the row except the checkbox selects it;
+                // checked/unchecked state is untouched by this.
+                setSelectedDocumentId(documentId);
+                // Clicking anywhere in the main window naturally gives it
+                // focus, which would drop an open pop-out behind it — hand
+                // focus straight back, including when re-selecting the row
+                // that is already selected (which wouldn't otherwise
+                // trigger the selectedDocumentId-change effect that also
+                // does this).
+                viewerWindow.focusPopout();
+              }}
+              onToggleChecked={(documentId, shiftKey) => {
+                handleCheckboxClick(documentId, shiftKey, sortedDocuments);
+                viewerWindow.focusPopout();
+              }}
+              onToggleSelectAll={() => toggleSelectAllVisible(filteredDocuments)}
+              onDelete={handleDeleteDocument}
+              emptyState={
                 <div className="empty-state">
                   <div className="glyph">000000</div>
                   <h3>{documents.length === 0 ? "No documents yet." : "No documents match the current filters."}</h3>
@@ -861,285 +674,8 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
                       : "Try clearing the search or tag filter."}
                   </p>
                 </div>
-              ) : (
-                // An explicit computed width, not just table-layout:fixed's
-                // own "auto width = sum of columns" spec behavior — that
-                // turned out not to reliably grow the table past 100% in
-                // practice (browsers appear to treat the CSS min-width:100%
-                // floor below as the effective basis and redistribute
-                // column proportions to still fit it, rather than letting
-                // the table actually grow). An unambiguous pixel width here
-                // removes that guesswork: once the columns' real sum
-                // exceeds the panel, this is bigger than 100%, and
-                // .table-wrap's overflow-x:auto has something concrete to
-                // scroll. min-width:100% (styles.css) still applies on top
-                // of this so the table never looks narrower than the panel
-                // either, if this computed value ever comes in a hair short.
-                <table
-                  className="reg"
-                  ref={columnWidths.tableRef}
-                  style={{
-                    width:
-                      SELECT_CELL_WIDTH +
-                      CHECK_CELL_WIDTH +
-                      Object.values(columnWidths.widths).reduce((sum, w) => sum + w, 0),
-                  }}
-                >
-                  <colgroup>
-                    <col style={{ width: SELECT_CELL_WIDTH }} />
-                    <col style={{ width: columnWidths.widths.guid }} ref={(el) => { columnWidths.colRefs.current.guid = el; }} />
-                    <col style={{ width: columnWidths.widths.familyGuid }} ref={(el) => { columnWidths.colRefs.current.familyGuid = el; }} />
-                    <col style={{ width: columnWidths.widths.originalFilename }} ref={(el) => { columnWidths.colRefs.current.originalFilename = el; }} />
-                    <col style={{ width: columnWidths.widths.extension }} ref={(el) => { columnWidths.colRefs.current.extension = el; }} />
-                    <col style={{ width: columnWidths.widths.sizeBytes }} ref={(el) => { columnWidths.colRefs.current.sizeBytes = el; }} />
-                    <col style={{ width: columnWidths.widths.docDate }} ref={(el) => { columnWidths.colRefs.current.docDate = el; }} />
-                    <col style={{ width: columnWidths.widths.author }} ref={(el) => { columnWidths.colRefs.current.author = el; }} />
-                    <col style={{ width: columnWidths.widths.contentModifiedAt }} ref={(el) => { columnWidths.colRefs.current.contentModifiedAt = el; }} />
-                    <col style={{ width: columnWidths.widths.toAddresses }} ref={(el) => { columnWidths.colRefs.current.toAddresses = el; }} />
-                    <col style={{ width: columnWidths.widths.ccAddresses }} ref={(el) => { columnWidths.colRefs.current.ccAddresses = el; }} />
-                    <col style={{ width: columnWidths.widths.tags }} ref={(el) => { columnWidths.colRefs.current.tags = el; }} />
-                    <col style={{ width: CHECK_CELL_WIDTH }} />
-                  </colgroup>
-                  <thead>
-                    <tr>
-                      <th className="selectcell">
-                        <input
-                          type="checkbox"
-                          checked={filteredDocuments.length > 0 && filteredDocuments.every((d) => checkedDocumentIds.has(d.documentId))}
-                          ref={(el) => {
-                            if (el) {
-                              const anyChecked = filteredDocuments.some((d) => checkedDocumentIds.has(d.documentId));
-                              const allChecked = filteredDocuments.length > 0 && filteredDocuments.every((d) => checkedDocumentIds.has(d.documentId));
-                              el.indeterminate = anyChecked && !allChecked;
-                            }
-                          }}
-                          onChange={() => toggleSelectAllVisible(filteredDocuments)}
-                          aria-label="Select all"
-                        />
-                      </th>
-                      <SortableTh
-                        column="guid"
-                        sortColumn={sortColumn}
-                        sortDirection={sortDirection}
-                        onSort={toggleSort}
-                        resizeHandle={<ColumnResizeHandle column="guid" columnWidths={columnWidths} />}
-                      >
-                        GUID
-                      </SortableTh>
-                      <SortableTh
-                        column="familyGuid"
-                        sortColumn={sortColumn}
-                        sortDirection={sortDirection}
-                        onSort={toggleSort}
-                        resizeHandle={<ColumnResizeHandle column="familyGuid" columnWidths={columnWidths} />}
-                      >
-                        Family GUID
-                      </SortableTh>
-                      <SortableTh
-                        column="originalFilename"
-                        sortColumn={sortColumn}
-                        sortDirection={sortDirection}
-                        onSort={toggleSort}
-                        resizeHandle={<ColumnResizeHandle column="originalFilename" columnWidths={columnWidths} />}
-                      >
-                        Filename
-                      </SortableTh>
-                      <SortableTh
-                        column="extension"
-                        sortColumn={sortColumn}
-                        sortDirection={sortDirection}
-                        onSort={toggleSort}
-                        resizeHandle={<ColumnResizeHandle column="extension" columnWidths={columnWidths} />}
-                      >
-                        Type
-                      </SortableTh>
-                      <SortableTh
-                        column="sizeBytes"
-                        sortColumn={sortColumn}
-                        sortDirection={sortDirection}
-                        onSort={toggleSort}
-                        resizeHandle={<ColumnResizeHandle column="sizeBytes" columnWidths={columnWidths} />}
-                      >
-                        Size
-                      </SortableTh>
-                      <SortableTh
-                        column="docDate"
-                        sortColumn={sortColumn}
-                        sortDirection={sortDirection}
-                        onSort={toggleSort}
-                        resizeHandle={<ColumnResizeHandle column="docDate" columnWidths={columnWidths} />}
-                      >
-                        Date
-                      </SortableTh>
-                      <SortableTh
-                        column="author"
-                        sortColumn={sortColumn}
-                        sortDirection={sortDirection}
-                        onSort={toggleSort}
-                        resizeHandle={<ColumnResizeHandle column="author" columnWidths={columnWidths} />}
-                      >
-                        Author
-                      </SortableTh>
-                      <SortableTh
-                        column="contentModifiedAt"
-                        sortColumn={sortColumn}
-                        sortDirection={sortDirection}
-                        onSort={toggleSort}
-                        resizeHandle={<ColumnResizeHandle column="contentModifiedAt" columnWidths={columnWidths} />}
-                      >
-                        Date Modified
-                      </SortableTh>
-                      <SortableTh
-                        column="toAddresses"
-                        sortColumn={sortColumn}
-                        sortDirection={sortDirection}
-                        onSort={toggleSort}
-                        resizeHandle={<ColumnResizeHandle column="toAddresses" columnWidths={columnWidths} />}
-                      >
-                        To
-                      </SortableTh>
-                      <SortableTh
-                        column="ccAddresses"
-                        sortColumn={sortColumn}
-                        sortDirection={sortDirection}
-                        onSort={toggleSort}
-                        resizeHandle={<ColumnResizeHandle column="ccAddresses" columnWidths={columnWidths} />}
-                      >
-                        Cc
-                      </SortableTh>
-                      {/* No inline position here — table.reg thead th already sets
-                          position:sticky, which (like any non-static position)
-                          already establishes the containing block the resize
-                          handle anchors against; overriding it would break this
-                          header's sticky-on-scroll behavior. */}
-                      <th>
-                        Tags
-                        <ColumnResizeHandle column="tags" columnWidths={columnWidths} />
-                      </th>
-                      <th className="checkcell"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sortedDocuments.map((doc) => {
-                      const appliedTagIds = appliedTagsByDocument[doc.documentId] ?? [];
-                      return (
-                        <tr
-                          key={doc.documentId}
-                          className={doc.documentId === selectedDocumentId ? "active" : ""}
-                          onClick={() => {
-                            // "Selected" = previewed in the right-hand pane.
-                            // Clicking anywhere on the row except the
-                            // checkbox selects it — checked/unchecked state
-                            // (handleCheckboxClick) is untouched by this.
-                            setSelectedDocumentId(doc.documentId);
-                            // Clicking anywhere in the main window naturally
-                            // gives it focus, which would drop an open
-                            // pop-out behind it — hand focus straight back,
-                            // including for re-selecting the row that's
-                            // already selected (which wouldn't otherwise
-                            // trigger the selectedDocumentId-change effect
-                            // that also does this).
-                            viewerWindow.focusPopout();
-                          }}
-                        >
-                          <td className="selectcell" onClick={(e) => e.stopPropagation()}>
-                            <input
-                              type="checkbox"
-                              checked={checkedDocumentIds.has(doc.documentId)}
-                              // Deliberately NOT preventDefault-and-do-
-                              // everything-in-onClick — that fights React's
-                              // own controlled-checkbox reconciliation (the
-                              // DOM's native toggle gets suppressed, but
-                              // React's tracking of "did this input change"
-                              // can desync from it, and the checkbox visibly
-                              // stops responding to clicks at all — a real
-                              // regression caught by real testing, not a
-                              // guess). Instead: let the click proceed
-                              // natively (onClick here only captures
-                              // shiftKey, since MouseEvent.shiftKey isn't
-                              // available on a checkbox's change event), and
-                              // do the actual state update in onChange,
-                              // which fires right after — the standard,
-                              // reliable React pattern for a controlled
-                              // checkbox. Also selects/previews the row like
-                              // a plain row click would (see handleCheckboxClick's
-                              // own comment for its toggle-only-this-one
-                              // checked-state behavior).
-                              onClick={(e) => {
-                                checkboxShiftKeyRef.current = e.shiftKey;
-                              }}
-                              onChange={() => {
-                                handleCheckboxClick(doc.documentId, checkboxShiftKeyRef.current, sortedDocuments);
-                                setSelectedDocumentId(doc.documentId);
-                                viewerWindow.focusPopout();
-                              }}
-                              aria-label={`Select ${doc.originalFilename}`}
-                            />
-                          </td>
-                          <td className="guid">{doc.guid}</td>
-                          <td className="muted">{doc.familyGuid}</td>
-                          <td
-                            className="fname"
-                            title={doc.depth > 0 ? `Attached to ${doc.parentGuid}` : doc.originalFilename}
-                            style={doc.depth > 0 ? { paddingLeft: 10 + doc.depth * 16 } : undefined}
-                          >
-                            {doc.depth > 0 && <span className="muted">↳ </span>}
-                            {stripExtension(displayFilename(doc), doc.extension)}
-                          </td>
-                          <td className="muted">{doc.extension}</td>
-                          <td className="muted">{formatSize(doc.sizeBytes)}</td>
-                          <td className="muted">{formatDate(doc.docDate)}</td>
-                          <td className="muted">{doc.author}</td>
-                          <td className="muted">{formatDate(doc.contentModifiedAt)}</td>
-                          <td className="muted">{doc.toAddresses}</td>
-                          <td className="muted">{doc.ccAddresses}</td>
-                          <td>
-                            <div className="tagchips">
-                              <span
-                                className="chip"
-                                style={{ background: `${INGEST_STATUS_COLORS[doc.ingestStatus]}22`, color: INGEST_STATUS_COLORS[doc.ingestStatus] }}
-                              >
-                                {doc.ingestStatus}
-                              </span>
-                              {doc.contentWarning && (
-                                <span className="chip" style={{ background: "#A6362C22", color: "#A6362C" }} title={doc.contentWarning}>
-                                  ⚠ possible injection
-                                </span>
-                              )}
-                              {appliedTagIds.map((tagId) => {
-                                const tag = tagsById.get(tagId);
-                                if (!tag) return null;
-                                const style = tag.color
-                                  ? { background: `${tag.color}22`, color: tag.color }
-                                  : { background: "var(--slate-soft)", color: "var(--ink-soft)" };
-                                return (
-                                  <span key={tagId} className="chip" style={style}>
-                                    {tag.name}
-                                  </span>
-                                );
-                              })}
-                            </div>
-                          </td>
-                          <td className="checkcell">
-                            <button
-                              type="button"
-                              className="row-delete-btn"
-                              aria-label={`Delete ${doc.originalFilename}`}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDeleteDocument(doc);
-                              }}
-                            >
-                              ×
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              )}
-            </div>
+              }
+            />
           </section>
 
           <div className={`col-resize-handle${rightResize.dragging ? " dragging" : ""}`} {...rightResize.handleProps} />

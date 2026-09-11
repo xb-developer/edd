@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { createPortal } from "react-dom";
+import { Modal } from "antd";
 
 export interface NoticeDialogProps {
   onClose: () => void;
@@ -7,14 +7,17 @@ export interface NoticeDialogProps {
 
 /**
  * Displays NOTICE.md (open-source attributions + the XBundle Ltd copyright
- * notice) in the same .modal-overlay/.modal-panel chrome ConfirmDialog
- * uses. Fetched at runtime from the client's own public/ dir (served at
- * `/NOTICE.md`, same static-asset path the logo/favicon already use)
+ * notice). Fetched at runtime from the client's own public/ dir (served at
+ * `/NOTICE.md`, the same static-asset path the logo/favicon already use)
  * rather than bundled at build time — this is the single copy also linked
- * from the repo's own README, so there's nothing to keep in sync. Rendered
- * as plain preformatted text, not parsed markdown — no markdown-rendering
- * library exists in this codebase yet, and NOTICE.md's own formatting
- * (headings, a table) reads fine unrendered.
+ * from the repo's README, so there's nothing to keep in sync. Rendered as
+ * plain preformatted text, not parsed markdown: no markdown renderer
+ * exists in this codebase, and NOTICE.md's own formatting (headings, a
+ * table) reads fine unrendered.
+ *
+ * On antd's Modal for the same reasons as ConfirmDialog — focus trap,
+ * Escape handling, focus restoration — none of which the hand-rolled
+ * overlay provided.
  */
 export function NoticeDialog({ onClose }: NoticeDialogProps) {
   const [text, setText] = useState<string | null>(null);
@@ -30,39 +33,13 @@ export function NoticeDialog({ onClose }: NoticeDialogProps) {
       .catch((err) => setError((err as Error).message));
   }, []);
 
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
-
-  return createPortal(
-    <div className="modal-overlay" onClick={onClose}>
-      <div
-        className="modal-panel"
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Third-party notices"
-        style={{ width: 720 }}
-      >
-        <div className="modal-panel-head">
-          <h3 style={{ margin: 0, fontSize: 15 }}>Third-party notices</h3>
-        </div>
-        {error && <p className="bulk-note">{error}</p>}
-        {!error && !text && <p className="empty-note">Loading…</p>}
-        {text && (
-          <pre style={{ whiteSpace: "pre-wrap", fontSize: 13, margin: "8px 0 20px", maxHeight: "60vh", overflowY: "auto" }}>{text}</pre>
-        )}
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
-          <button type="button" className="pop-out-btn" onClick={onClose}>
-            Close
-          </button>
-        </div>
-      </div>
-    </div>,
-    document.body,
+  return (
+    <Modal open title="Third-party notices" onCancel={onClose} onOk={onClose} footer={null} width={720} aria-label="Third-party notices">
+      {error && <p className="bulk-note">{error}</p>}
+      {!error && !text && <p className="empty-note">Loading…</p>}
+      {/* max-h-[60vh] rather than a full-height panel: the notices are long,
+          and the modal should scroll its own body, not the page. */}
+      {text && <pre className="my-2 max-h-[60vh] overflow-y-auto text-[13px] whitespace-pre-wrap">{text}</pre>}
+    </Modal>
   );
 }

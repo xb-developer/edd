@@ -527,17 +527,16 @@ h2.panel-title {
      the whole page instead of scrolling internally. Classic flexbox
      overflow gotcha. */
   min-height: 0;
-  /* Same idea, horizontal axis — the whole point of the resized/wide
-     table.reg below is that it grows wider than this wrapper on purpose;
-     without min-width:0 this wrapper could refuse to be the size it's
-     told to be (width:100%, above) and expand to match instead of
-     scrolling internally. */
+  /* Same idea, horizontal axis — resized columns can sum to more than
+     this wrapper's width on purpose; without min-width:0 this wrapper
+     could refuse to be the size it's told to be (width:100%, above) and
+     expand to match instead of letting the table scroll internally. */
   min-width: 0;
-  /* Both axes: vertical for many rows (as before), horizontal now that
-     resizable columns (table.reg's own width, below) can grow past what
-     fits — this is the "only appears when needed" scrollbar, not a
-     permanently-visible one. */
-  overflow: auto;
+  /* antd's Table owns its own scrolling now (scroll.x / scroll.y, which
+     virtual mode requires), so this wrapper must NOT also scroll — two
+     nested scrollers on the same axis is how you get a sticky header that
+     scrolls away. It only measures. */
+  overflow: hidden;
   position: relative;
 }
 /* Whole-window drop target (see MatterDetail.tsx's window-level drag
@@ -558,52 +557,59 @@ h2.panel-title {
   font-weight: 600;
   pointer-events: none;
 }
-table.reg {
-  /* auto + min-width:100% (not a flat 100%) — with table-layout:fixed and
-     an auto width, the spec-defined behavior is "use the sum of the
-     column widths" as the table's own width, so widening a column past
-     what fits genuinely grows the table (letting .table-wrap's own
-     overflow-x:auto produce a real scrollbar) instead of every column
-     being silently squeezed back down to fit 100% regardless of what was
-     dragged. min-width:100% keeps today's "fills the panel" look intact
-     when the columns' combined width is still narrower than the panel. */
-  width: auto;
-  min-width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-  table-layout: fixed;
+/* ---------------------------------------------------------------
+   Ant Design Table overrides.
+
+   This block is the seam described in antdTheme.ts: colours, borders and
+   control sizing come from antd's own theme tokens, but a handful of
+   things have no token and can only be reached by selector — the header's
+   uppercase micro-caps treatment, the exact 34px row height this layout is
+   built around, and the selected-row highlight driven by `rowClassName`.
+   Everything the app lays out ITSELF is Tailwind, in the JSX.
+   --------------------------------------------------------------- */
+.ant-table-wrapper,
+.ant-table-wrapper .ant-spin-nested-loading,
+.ant-table-wrapper .ant-spin-container {
+  height: 100%;
 }
-table.reg thead th {
-  position: sticky;
-  top: 0;
-  background: #fafaf9;
-  border-bottom: 1px solid var(--line);
-  text-align: left;
-  padding: 8px 10px;
+.ant-table {
+  font-size: 12px;
+}
+.ant-table-thead > tr > th.ant-table-cell {
   font-size: 10.5px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--ink-soft);
   font-weight: 600;
+  color: var(--ink-soft);
   white-space: nowrap;
-  cursor: pointer;
   user-select: none;
-  z-index: 2;
+  /* The resize handle is absolutely positioned against this. */
+  position: relative;
+}
+.ant-table-thead > tr > th.ant-table-cell:hover {
+  color: var(--ink);
+}
+.ant-table-tbody > tr > td.ant-table-cell {
+  height: var(--row-h);
+  padding: 0 10px;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-table.reg thead th:hover {
-  color: var(--ink);
+.ant-table-tbody > tr {
+  cursor: pointer;
+  height: var(--row-h);
 }
-table.reg thead th.sorted {
-  color: var(--navy);
+/* Driven by DocumentTable's rowClassName — "selected" here means
+   "previewed in the right-hand pane", which is deliberately NOT the same
+   thing as the checkbox's checked state. */
+.ant-table-tbody > tr.active > td.ant-table-cell,
+.ant-table-tbody > tr.active:hover > td.ant-table-cell {
+  background: var(--navy-soft);
 }
-/* th already has position:sticky (above), which — like any non-static
-   position — establishes the containing block this anchors against. */
+/* th already has position:relative (above), which establishes the
+   containing block this anchors against. */
 .col-resize-th-handle {
-  /* right:0, not a negative offset straddling the border — the th itself
-     has overflow:hidden (for its own text-ellipsis truncation), which
-     would clip a handle positioned outside its bounds. */
   position: absolute;
   top: 0;
   right: 0;
@@ -615,26 +621,6 @@ table.reg thead th.sorted {
 }
 .col-resize-th-handle:hover,
 .col-resize-th-handle.dragging {
-  background: var(--navy-soft);
-}
-table.reg tbody td {
-  padding: 0 10px;
-  border-bottom: 1px solid var(--line-soft);
-  vertical-align: middle;
-  height: var(--row-h);
-  box-sizing: border-box;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-table.reg tbody tr {
-  cursor: pointer;
-  height: var(--row-h);
-}
-table.reg tbody tr:hover {
-  background: var(--slate-soft);
-}
-table.reg tbody tr.active {
   background: var(--navy-soft);
 }
 .selectcell {

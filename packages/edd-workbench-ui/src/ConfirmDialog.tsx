@@ -1,5 +1,4 @@
-import { useEffect } from "react";
-import { createPortal } from "react-dom";
+import { Modal } from "antd";
 
 export interface ConfirmDialogProps {
   title: string;
@@ -10,44 +9,34 @@ export interface ConfirmDialogProps {
 }
 
 /**
- * Real, functional confirm dialog — reuses the .modal-overlay/.modal-panel/
- * .modal-panel-head chrome already in styles.css, left there specifically
- * for "the next dialog that needs it" after ExportButtons dropped an
- * earlier confirmation modal that wasn't backing a real feature (see that
- * file's own comment). Escape-to-close lives here, in the component, per
- * that same CSS comment's explicit note that it's not a pure-CSS concern.
+ * Confirm dialog, on antd's Modal.
+ *
+ * The hand-rolled version this replaces portalled its own overlay and
+ * wired up its own Escape listener. Modal brings those plus the parts that
+ * were missing: a real focus trap, focus restored to the trigger on close,
+ * `aria-modal` semantics managed for us, and scroll locking. This is the
+ * kind of widget where "hand-built" was costing accessibility rather than
+ * saving complexity.
+ *
+ * Rendered only while open (the caller mounts/unmounts it), so `open` is
+ * always true — `destroyOnClose` is unnecessary for the same reason.
  */
 export function ConfirmDialog({ title, message, confirmLabel = "Confirm", onConfirm, onCancel }: ConfirmDialogProps) {
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onCancel();
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onCancel]);
-
-  return createPortal(
-    <div className="modal-overlay" onClick={onCancel}>
-      <div className="modal-panel" onClick={(e) => e.stopPropagation()} role="alertdialog" aria-modal="true" aria-label={title}>
-        <div className="modal-panel-head">
-          <h3 style={{ margin: 0, fontSize: 15 }}>{title}</h3>
-        </div>
-        <p style={{ margin: "8px 0 20px", color: "var(--ink-soft)" }}>{message}</p>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <button type="button" className="pop-out-btn" onClick={onCancel}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="pop-out-btn"
-            style={{ borderColor: "var(--seal)", color: "var(--seal)", background: "var(--seal-soft)" }}
-            onClick={onConfirm}
-          >
-            {confirmLabel}
-          </button>
-        </div>
-      </div>
-    </div>,
-    document.body,
+  return (
+    <Modal
+      open
+      title={title}
+      onOk={onConfirm}
+      onCancel={onCancel}
+      okText={confirmLabel}
+      cancelText="Cancel"
+      // Destructive by default: every current caller is a delete. antd
+      // styles this from colorError, which antdTheme.ts maps to --seal —
+      // the same colour the hand-built version set inline.
+      okButtonProps={{ danger: true }}
+      width={420}
+    >
+      <p className="text-ink-soft my-2">{message}</p>
+    </Modal>
   );
 }

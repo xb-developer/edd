@@ -50,7 +50,7 @@ export function PptxSlideViewer({ url }: PptxSlideViewerProps) {
   return (
     <div style={{ position: "relative", width: "100%", height: "100%", overflow: "auto" }}>
       {loading && <p className="px-0.5 py-1 text-xs italic text-ink-soft">Loading slides…</p>}
-      {error && <div className="rounded border border-dashed border-line p-6 text-center text-xs text-ink-soft">{error}</div>}
+      {error && <div className="rounded-[4px] border border-dashed border-line p-6 text-center text-xs text-ink-soft">{error}</div>}
       <div ref={containerRef} style={{ width: "100%" }} />
     </div>
   );

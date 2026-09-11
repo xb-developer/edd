@@ -46,6 +46,35 @@
   --font-sans: "Inter", system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
 
+  /*
+   * Tailwind's type scale and spacing scale, pinned to ABSOLUTE PIXELS.
+   *
+   * Both default to rem (--text-xs is 0.75rem, --spacing is 0.25rem), and
+   * rem resolves against the ROOT font size — which this app never sets, so
+   * it is whatever the browser is configured to. Everything else here is
+   * absolute px: antd's tokens, and the rules in styles.css. On a browser
+   * at the default 16px the two systems coincide (0.75rem === 12px) and the
+   * inconsistency is invisible. On a browser set to anything else — Chrome's
+   * "Small" is 13px — the rem half shrinks and the px half does not, so the
+   * panels rendered smaller than the document table sitting beside them.
+   * That is a real bug that reproduces only on some machines.
+   *
+   * Pixels, not rem, is the deliberate choice: this is a dense desktop tool
+   * whose widget library sizes everything in px, and half-honouring a root
+   * font-size preference is worse than not honouring it — it desynchronises
+   * the app from itself. Browser zoom still scales everything correctly.
+   */
+  --text-xs: 12px;
+  --text-sm: 14px;
+  --text-base: 16px;
+  --text-lg: 18px;
+  --text-xl: 20px;
+  --spacing: 4px;
+  /* Same reason: antd's own borderRadius token is 4px, and a rem-based
+     radius would drift away from it on a non-default root font size. */
+  --radius-sm: 4px;
+  --radius-lg: 8px;
+
   /* The document table's row height — a real layout constant shared by the
      table, its virtualised row measurement, and the panels that size
      against it, not a one-off value. */

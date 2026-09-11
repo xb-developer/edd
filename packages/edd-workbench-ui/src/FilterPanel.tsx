@@ -290,7 +290,7 @@ export function FilterPanel({
             />
             <div className="flex flex-col gap-0.5">
               {allTags.map((tag) => (
-                <label key={tag.id} className="flex cursor-pointer items-center gap-[7px] rounded px-1.5 py-[5px] text-xs hover:bg-slate-soft">
+                <label key={tag.id} className="flex cursor-pointer items-center gap-[7px] rounded-[4px] px-1.5 py-[5px] text-xs hover:bg-slate-soft">
                   <Checkbox checked={selectedTagIds.includes(tag.id)} onChange={() => onToggleTagId(tag.id)} />
                   <span className="h-[7px] w-[7px] flex-none rounded-full" style={{ background: tag.color ?? "var(--ink-soft)" }} />
                   <span>{tag.name}</span>
@@ -376,7 +376,7 @@ export function FilterPanel({
                   <tr>
                     <td colSpan={2}>
                       <select
-                        className="mt-1.5 w-full rounded border border-line px-1.5 py-[5px] text-xs"
+                        className="mt-1.5 w-full rounded-[4px] border border-line px-1.5 py-[5px] text-xs"
                         autoFocus
                         defaultValue=""
                         disabled={!candidates || busyUserId !== null}

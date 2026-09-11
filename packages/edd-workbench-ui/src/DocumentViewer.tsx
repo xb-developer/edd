@@ -46,7 +46,7 @@ export function DocumentViewer({ api, matterId, document }: DocumentViewerProps)
     const attachments = Array.isArray(metadata.attachmentFilenames) ? (metadata.attachmentFilenames as string[]) : [];
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 12, height: "100%", overflowY: "auto" }}>
-        <dl className="mb-2.5 flex flex-col gap-[3px] rounded border border-line bg-[#fafaf9] px-3 py-2.5 text-xs">
+        <dl className="mb-2.5 flex flex-col gap-[3px] rounded-[4px] border border-line bg-[#fafaf9] px-3 py-2.5 text-xs">
           <div>
             <span className="inline-block w-16 text-xs font-semibold text-ink-soft uppercase">From</span> {document.author ?? "(unknown)"}
           </div>
@@ -92,7 +92,7 @@ export function DocumentViewer({ api, matterId, document }: DocumentViewerProps)
     );
   }
 
-  if (error) return <div className="rounded border border-dashed border-line p-6 text-center text-xs text-ink-soft">{error}</div>;
+  if (error) return <div className="rounded-[4px] border border-dashed border-line p-6 text-center text-xs text-ink-soft">{error}</div>;
   if (needsViewUrl && !viewUrl) return <p className="px-0.5 py-1 text-xs italic text-ink-soft">Loading preview…</p>;
 
   switch (kind) {
@@ -113,12 +113,12 @@ export function DocumentViewer({ api, matterId, document }: DocumentViewerProps)
     default:
       // A corrupt/unrecognized file (viewerKindFor's "unsupported") also
       // falls here — never a blank viewer with no explanation.
-      return <div className="rounded border border-dashed border-line p-6 text-center text-xs text-ink-soft">Preview not yet available for this file type ({document.contentTypeDetected}).</div>;
+      return <div className="rounded-[4px] border border-dashed border-line p-6 text-center text-xs text-ink-soft">Preview not yet available for this file type ({document.contentTypeDetected}).</div>;
   }
 }
 
 function DocxViewer({ html }: { html: string | null }) {
-  if (!html) return <div className="rounded border border-dashed border-line p-6 text-center text-xs text-ink-soft">No preview available for this document.</div>;
+  if (!html) return <div className="rounded-[4px] border border-dashed border-line p-6 text-center text-xs text-ink-soft">No preview available for this document.</div>;
   // Same threat model as the email body above: docx content is untrusted
   // third-party material, sanitized at render time rather than at
   // extraction time so storage always holds the original conversion.
@@ -126,7 +126,7 @@ function DocxViewer({ html }: { html: string | null }) {
 }
 
 function ExtractedTextViewer({ text }: { text: string | null }) {
-  if (!text) return <div className="rounded border border-dashed border-line p-6 text-center text-xs text-ink-soft">No preview available for this document.</div>;
+  if (!text) return <div className="rounded-[4px] border border-dashed border-line p-6 text-center text-xs text-ink-soft">No preview available for this document.</div>;
   return <pre className="preview-text" style={{ height: "100%" }}>{text}</pre>;
 }
 
@@ -137,7 +137,7 @@ interface XlsxSheetView {
 
 function XlsxViewer({ sheets }: { sheets: XlsxSheetView[] }) {
   const [activeSheet, setActiveSheet] = useState(0);
-  if (sheets.length === 0) return <div className="rounded border border-dashed border-line p-6 text-center text-xs text-ink-soft">No preview available for this spreadsheet.</div>;
+  if (sheets.length === 0) return <div className="rounded-[4px] border border-dashed border-line p-6 text-center text-xs text-ink-soft">No preview available for this spreadsheet.</div>;
   const sheet = sheets[Math.min(activeSheet, sheets.length - 1)];
 
   return (

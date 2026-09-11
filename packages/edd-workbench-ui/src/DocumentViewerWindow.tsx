@@ -84,9 +84,9 @@ function DocumentViewerWindowInner({ apiBaseUrl = "http://localhost:4430/api", g
   }, [api, matterId, documentId]);
 
   if (sessionExpired) {
-    return <p className="rounded border border-dashed border-line p-6 text-center text-xs text-ink-soft">Session expired — close this window and reopen the viewer from the main application.</p>;
+    return <p className="rounded-[4px] border border-dashed border-line p-6 text-center text-xs text-ink-soft">Session expired — close this window and reopen the viewer from the main application.</p>;
   }
-  if (error) return <p className="rounded border border-dashed border-line p-6 text-center text-xs text-ink-soft">{error}</p>;
+  if (error) return <p className="rounded-[4px] border border-dashed border-line p-6 text-center text-xs text-ink-soft">{error}</p>;
   if (!documentId) return <p className="p-4 text-center text-xs italic text-ink-soft">No document selected.</p>;
   if (!document) return <p className="px-0.5 py-1 text-xs italic text-ink-soft">Loading document…</p>;
 

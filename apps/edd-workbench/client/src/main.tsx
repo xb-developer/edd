@@ -184,7 +184,7 @@ function ViewerWindowShell({ matterId, documentId, sessionId }: { matterId: stri
   if (!isAuthenticated) {
     return (
       <div className="flex h-screen items-center justify-center bg-paper">
-        <p className="rounded border border-dashed border-line p-6 text-center text-xs text-ink-soft">Session expired — close this window and reopen the viewer from the main application.</p>
+        <p className="rounded-[4px] border border-dashed border-line p-6 text-center text-xs text-ink-soft">Session expired — close this window and reopen the viewer from the main application.</p>
       </div>
     );
   }

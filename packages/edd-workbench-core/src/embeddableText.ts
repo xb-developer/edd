@@ -39,7 +39,17 @@ export function resolveEmbeddableText(contentType: string, metadata: Record<stri
 
   const html = metadata.html;
   if (typeof html === "string") {
-    const stripped = htmlToText(html, { wordwrap: false }).trim();
+    // Skip <img> entirely — without this, html-to-text renders an inline
+    // data: URI image (e.g. a logo mammoth.js embeds as base64 in a Word
+    // doc's own HTML) as if its base64 payload were real text, which then
+    // gets chunked and embedded as document content. A real bug, not
+    // hypothetical: confirmed against a live "Disposing of Digital
+    // Debris.dotm" chunk whose embedded "text" was a multi-KB base64 blob,
+    // polluting that matter's whole embedding space (see the investigation
+    // that found this — every top-12 nearest-neighbor match for an
+    // unrelated question was junk: this, plus degenerate OCR output on a
+    // couple of photos).
+    const stripped = htmlToText(html, { wordwrap: false, selectors: [{ selector: "img", format: "skip" }] }).trim();
     if (stripped.length > 0) return stripped;
   }
 

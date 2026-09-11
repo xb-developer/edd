@@ -30,4 +30,12 @@ describe("resolveEmbeddableText", () => {
   it("returns null when every field is empty/whitespace-only", () => {
     expect(resolveEmbeddableText("eml", { bodyText: "   ", text: null, html: "" })).toBeNull();
   });
+
+  it("strips an embedded image's base64 data URI out of html rather than embedding it as text — real bug: mammoth.js renders a Word doc's own inline logo as <img src=\"data:image/x-emf;base64,...\">, which previously became multi-KB of base64 'document content'", () => {
+    const html = '<p><strong><img src="data:image/x-emf;base64,AQAAAGwAAAAAAAAAAAAAAA8BAABZAAAAAAAAAA=="></strong></p><p>Disposing of Digital Debris</p>';
+    const result = resolveEmbeddableText("docx", { html });
+    expect(result).toBe("Disposing of Digital Debris");
+    expect(result).not.toContain("base64");
+    expect(result).not.toContain("AQAAAGwAAAAAAAAAAAAAAA8BAABZAAAAAAAAAA");
+  });
 });

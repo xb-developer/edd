@@ -794,6 +794,59 @@ describe("documents router — list", () => {
   });
 });
 
+describe("documents router — ingest-status", () => {
+  let orgIdsToClean: string[] = [];
+
+  afterEach(async () => {
+    for (const id of orgIdsToClean) await deleteTestOrg(id);
+    orgIdsToClean = [];
+  });
+
+  it("returns only {documentId, ingestStatus, uploadBatchId} for the requested batch ids, excluding a different batch in the same matter — no guid/tree fields at all", async () => {
+    const { orgId, matterId, userId } = await createTestOrgAndMatter("ingest-status");
+    orgIdsToClean.push(orgId);
+    const batchA = randomUUID();
+    const batchB = randomUUID();
+
+    const [docA1, docA2, docB] = await withOrgSession(orgId, async (client) => {
+      async function insert(guidNumber: number, ingestStatus: string, batchId: string): Promise<string> {
+        const documentId = randomUUID();
+        await client.query(
+          `INSERT INTO documents (id, org_id, matter_id, family_document_id, depth, guid_number, original_filename, extension, size_bytes, s3_key, content_type_detected, ingest_status, upload_batch_id)
+           VALUES ($1, $2, $3, $1, 0, $4, 'x.pdf', 'pdf', 10, 'k', 'pdf', $5, $6)`,
+          [documentId, orgId, matterId, guidNumber, ingestStatus, batchId],
+        );
+        return documentId;
+      }
+      return [await insert(1, "pending", batchA), await insert(2, "ready", batchA), await insert(3, "pending", batchB)];
+    });
+
+    const app = buildTestApp({ orgId, userId, role: "admin", email: "tester@example.com" });
+    const response = await request(app).get(`/api/matters/${matterId}/documents/ingest-status?batchIds=${batchA}`).send();
+
+    expect(response.status).toBe(200);
+    expect(response.body).toHaveLength(2);
+    expect(response.body).toEqual(
+      expect.arrayContaining([
+        { documentId: docA1, ingestStatus: "pending", uploadBatchId: batchA },
+        { documentId: docA2, ingestStatus: "ready", uploadBatchId: batchA },
+      ]),
+    );
+    expect(response.body.find((r: { documentId: string }) => r.documentId === docB)).toBeUndefined();
+  });
+
+  it("returns an empty array without querying anything when no batchIds are given", async () => {
+    const { orgId, matterId, userId } = await createTestOrgAndMatter("ingest-status-empty");
+    orgIdsToClean.push(orgId);
+
+    const app = buildTestApp({ orgId, userId, role: "admin", email: "tester@example.com" });
+    const response = await request(app).get(`/api/matters/${matterId}/documents/ingest-status`).send();
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual([]);
+  });
+});
+
 describe("documents router — view-url", () => {
   let orgIdsToClean: string[] = [];
 

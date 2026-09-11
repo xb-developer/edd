@@ -73,6 +73,12 @@ export function createApiClient(baseUrl: string, getAccessToken: () => Promise<s
 
     getMatterDocuments: (matterId: string) => request<DocumentDTO[]>(`/matters/${matterId}/documents`),
 
+    /** Lightweight status-only poll for a set of upload batches — no tree walk, no guid numbering, just {documentId, ingestStatus, uploadBatchId} for whatever currently matches (see documents.ts's own comment on why this exists separately from getMatterDocuments). Backs useDocumentImport.ts's ingest-watch poll. */
+    getIngestStatus: (matterId: string, batchIds: readonly string[]) =>
+      request<{ documentId: string; ingestStatus: DocumentDTO["ingestStatus"]; uploadBatchId: string }[]>(
+        `/matters/${matterId}/documents/ingest-status?batchIds=${batchIds.map(encodeURIComponent).join(",")}`,
+      ),
+
     getDocument: (matterId: string, documentId: string) => request<DocumentDTO>(`/matters/${matterId}/documents/${documentId}`),
 
     getDocumentViewUrl: (matterId: string, documentId: string) =>

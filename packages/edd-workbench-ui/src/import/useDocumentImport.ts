@@ -76,9 +76,15 @@ export function useDocumentImport(api: ApiClient, matterId: string, onFileSettle
       if (activeBatchIdsRef.current.size === 0) return;
       attemptRef.current++;
 
+      // Status-only lookup, not the full getMatterDocuments list — that
+      // would re-run the server's whole matter-wide tree walk/guid
+      // renumbering (see documents.ts's own comment) on every 3s tick for
+      // up to MAX_INGEST_POLL_ATTEMPTS ticks, purely to learn a handful of
+      // batch ids' current status. The real, guid-bearing refresh only
+      // happens once, via onFileSettledRef below, when the batch settles.
       let latest;
       try {
-        latest = await api.getMatterDocuments(matterId);
+        latest = await api.getIngestStatus(matterId, Array.from(activeBatchIdsRef.current));
       } catch {
         return; // Transient fetch failure — try again next tick, don't give up on a network blip.
       }

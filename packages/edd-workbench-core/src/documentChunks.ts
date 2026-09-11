@@ -26,10 +26,20 @@ export async function replaceDocumentChunks(
   params: { orgId: string; matterId: string; documentId: string; chunks: DocumentChunkInput[] },
 ): Promise<void> {
   await client.query("DELETE FROM document_chunks WHERE document_id = $1", [params.documentId]);
-  for (const [index, chunk] of params.chunks.entries()) {
-    await client.query(
-      "INSERT INTO document_chunks (org_id, matter_id, document_id, chunk_index, text, embedding) VALUES ($1, $2, $3, $4, $5, $6::vector)",
-      [params.orgId, params.matterId, params.documentId, index, chunk.text, toVectorLiteral(chunk.embedding)],
-    );
-  }
+  if (params.chunks.length === 0) return;
+
+  // One batched INSERT via unnest(), not one sequential round-trip per
+  // chunk — a document chunked into a few hundred pieces (easily reached
+  // by a multi-hundred-KB extracted text at chunking.ts's ~1200-char
+  // chunk size) previously meant that many serialized awaits per document
+  // during embedding.
+  const indexes = params.chunks.map((_, i) => i);
+  const texts = params.chunks.map((chunk) => chunk.text);
+  const embeddings = params.chunks.map((chunk) => toVectorLiteral(chunk.embedding));
+  await client.query(
+    `INSERT INTO document_chunks (org_id, matter_id, document_id, chunk_index, text, embedding)
+     SELECT $1, $2, $3, u.chunk_index, u.text, u.embedding::vector
+     FROM unnest($4::int[], $5::text[], $6::text[]) AS u(chunk_index, text, embedding)`,
+    [params.orgId, params.matterId, params.documentId, indexes, texts, embeddings],
+  );
 }

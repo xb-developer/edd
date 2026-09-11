@@ -104,6 +104,31 @@ describe("replaceDocumentChunks", () => {
     expect(rows.rows).toEqual([{ text: "only one now" }]);
   });
 
+  it("inserts a large batch (one round-trip via unnest, not one INSERT per chunk) correctly ordered and intact", async () => {
+    const { orgId, matterId, documentId } = await createTestOrgMatterDocument();
+    cleanupOrgId = orgId;
+
+    const chunkCount = 300;
+    await withOrgSession(orgId, (client) =>
+      replaceDocumentChunks(client, {
+        orgId,
+        matterId,
+        documentId,
+        chunks: Array.from({ length: chunkCount }, (_, i) => ({ text: `chunk ${i}`, embedding: fakeEmbedding(i / 1000) })),
+      }),
+    );
+
+    const rows = await withOrgSession(orgId, (client) =>
+      client.query<{ chunk_index: number; text: string }>(
+        "SELECT chunk_index, text FROM document_chunks WHERE document_id = $1 ORDER BY chunk_index",
+        [documentId],
+      ),
+    );
+    expect(rows.rows).toHaveLength(chunkCount);
+    expect(rows.rows[0]).toEqual({ chunk_index: 0, text: "chunk 0" });
+    expect(rows.rows[299]).toEqual({ chunk_index: 299, text: "chunk 299" });
+  });
+
   it("is cascade-deleted when the owning document is deleted", async () => {
     const { orgId, matterId, documentId } = await createTestOrgMatterDocument();
     cleanupOrgId = orgId;

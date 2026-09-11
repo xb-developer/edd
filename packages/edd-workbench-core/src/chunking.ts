@@ -15,8 +15,15 @@ export function chunkText(text: string, chunkSize: number = DEFAULT_CHUNK_SIZE):
   while (start < text.length) {
     let end = Math.min(start + chunkSize, text.length);
     if (end < text.length) {
-      const lastSpace = text.lastIndexOf(" ", end);
-      if (lastSpace > start) end = lastSpace;
+      // Bounded to just this chunk's own slice — text.lastIndexOf(" ", end)
+      // on the WHOLE string would otherwise scan backward from `end` with
+      // no lower bound, all the way to index 0 when the span has no space
+      // at all (e.g. garbled OCR output or a stray base64 blob, both of
+      // which have actually reached this function in production — see
+      // embeddableText.ts's own comment). That turned chunking O(n²) on
+      // whitespace-sparse text; slicing first keeps each lookup O(chunkSize).
+      const lastSpace = text.slice(start, end).lastIndexOf(" ");
+      if (lastSpace > 0) end = start + lastSpace;
     }
     const chunk = text.slice(start, end).trim();
     if (chunk.length > 0) chunks.push(chunk);

@@ -160,6 +160,40 @@ documentsRouter.get("/", async (req: Request<{ matterId: string }>, res, next) =
   }
 });
 
+// Registered before GET /:id, deliberately — Express would otherwise match
+// "/ingest-status" as :id="ingest-status" first.
+//
+// Backs useDocumentImport.ts's ingest-watch poll (every 3s while any
+// upload_batch_id is still being watched — see migration 034). That poll
+// used to call the plain GET / above, which runs the full
+// MATTER_DOCUMENT_TREE_CTE recursive walk and renumbers every document in
+// the matter — real cost paid ~40 times per import (MAX_INGEST_POLL_ATTEMPTS)
+// just to check a handful of batch ids. This is a plain indexed lookup
+// (documents_upload_batch_id_idx, matter_id, upload_batch_id) with no tree
+// walk at all, and only returns the columns the poll actually needs.
+documentsRouter.get("/ingest-status", async (req: Request<{ matterId: string }>, res, next) => {
+  try {
+    const { orgId } = req.eddContext!;
+    const { matterId } = req.params;
+    const batchIds = ((req.query.batchIds as string) ?? "").split(",").filter(Boolean);
+    if (batchIds.length === 0) {
+      res.json([]);
+      return;
+    }
+
+    const rows = await withOrgSession(orgId, (client) =>
+      client.query<{ id: string; ingest_status: string; upload_batch_id: string }>(
+        "SELECT id, ingest_status, upload_batch_id FROM documents WHERE matter_id = $1 AND upload_batch_id = ANY($2::uuid[])",
+        [matterId, batchIds],
+      ),
+    );
+
+    res.json(rows.rows.map((row) => ({ documentId: row.id, ingestStatus: row.ingest_status, uploadBatchId: row.upload_batch_id })));
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Single-document fetch, mirroring view-url's authz shape (org-scoped
 // lookup, 404 on miss). Used by the pop-out viewer window: it can only
 // cheaply carry primitive ids through window.open()'s URL, not a full DTO,

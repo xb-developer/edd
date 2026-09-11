@@ -71,6 +71,19 @@ export const antdTheme: ThemeConfig = {
       // against. antd's "small" default is taller.
       cellPaddingBlockSM: 6,
       cellPaddingInlineSM: 8,
+      // The table's real font size, and the reference every other piece of
+      // text in the app is matched to.
+      //
+      // This has to be a token. styles.css used to carry
+      // `.ant-table { font-size: 12px }`, which never applied: antd emits
+      // `.ant-table-wrapper .ant-table.ant-table-small { font-size: … }`
+      // (three classes) and simply outranked it. So the table quietly
+      // rendered at whatever the global fontSize token happened to be —
+      // 13px — while the panels beside it were 12px, which is the size
+      // mismatch that was reported.
+      cellFontSize: 12,
+      cellFontSizeMD: 12,
+      cellFontSizeSM: 12,
       headerBg: "#eef1f6",
       headerColor: INK,
       rowSelectedBg: "#eef1f6",

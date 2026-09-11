@@ -34,9 +34,6 @@
 .ant-table-wrapper .ant-spin-container {
   height: 100%;
 }
-.ant-table {
-  font-size: 12px;
-}
 .ant-table-thead > tr > th.ant-table-cell {
   /* 12px like everything else. The uppercase treatment is kept, but the
      letter-spacing is eased off from 0.05em — at 12px it widened the

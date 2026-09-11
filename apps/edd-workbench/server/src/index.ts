@@ -100,7 +100,7 @@ app.use("/api/matters/:matterId/tags", tagsRouter);
 app.use("/api/matters/:matterId/document-tags", documentTagsRouter);
 app.use("/api/matters/:matterId/exports", exportsRouter);
 app.use("/api/matters/:matterId/members", matterMembersRouter);
-app.use("/api/matters/:matterId/audit-load", matterAuditRouter);
+app.use("/api/matters/:matterId/audit", matterAuditRouter);
 app.use("/api/matters/:matterId/ask", askRouter);
 app.use("/api/matters/:matterId/search", searchRouter);
 // Moved from the old bare "/api/worker-status" — its queued/ok/failed

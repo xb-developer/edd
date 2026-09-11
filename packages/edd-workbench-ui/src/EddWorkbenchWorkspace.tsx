@@ -137,10 +137,11 @@ export function EddWorkbenchWorkspace({ apiBaseUrl = "http://localhost:4430/api"
   }
 
   async function handleDownloadAuditLog() {
+    if (!selectedMatter) return;
     setDownloadingAudit(true);
     try {
       setError(null);
-      const blob = await api.downloadAuditLog();
+      const blob = await api.downloadAuditLog(selectedMatter.id);
       // Blob -> temporary object URL -> synthetic <a download> click is the
       // standard way to save a fetched (not navigated-to) file — the
       // Authorization header this needs can't be attached to a plain
@@ -149,7 +150,7 @@ export function EddWorkbenchWorkspace({ apiBaseUrl = "http://localhost:4430/api"
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `audit-log-${new Date().toISOString().slice(0, 10)}.csv`;
+      link.download = `audit-log-${selectedMatter.id}-${new Date().toISOString().slice(0, 10)}.csv`;
       link.click();
       URL.revokeObjectURL(url);
     } catch (err) {

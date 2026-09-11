@@ -163,7 +163,7 @@ export function createApiClient(baseUrl: string, getAccessToken: () => Promise<s
       request<void>(`/matters/${matterId}/members/${userId}`, { method: "DELETE" }),
 
     /** Fire-and-forget from the caller's side — see EddWorkbenchWorkspace.tsx's selectMatter. */
-    recordMatterLoad: (matterId: string) => request<void>(`/matters/${matterId}/audit-load`, { method: "POST" }),
+    recordMatterLoad: (matterId: string) => request<void>(`/matters/${matterId}/audit`, { method: "POST" }),
 
     /** Best-effort, called right before the actual Auth0 logout redirect — never let a failure here block logout. */
     recordLogout: () => request<void>("/audit/logout", { method: "POST" }),
@@ -185,10 +185,10 @@ export function createApiClient(baseUrl: string, getAccessToken: () => Promise<s
     /** Backs the topbar's WorkerHealthBar search-index chip. Available to any authenticated caller, scoped to their own org. */
     getSearchHealth: () => request<SearchHealthDTO>("/search-health"),
 
-    /** Whole-org audit trail as a CSV Blob (admin-only server-side — see audit.ts). Returns the Blob rather than triggering the save itself — an <a download> synthetic click needs to happen in response to the same user gesture that called this, which the caller owns, not this file. */
-    downloadAuditLog: async () => {
+    /** This matter's own audit trail as a CSV Blob (admin-only server-side — see matterAudit.ts) — never another matter's, even in the same org. Returns the Blob rather than triggering the save itself — an <a download> synthetic click needs to happen in response to the same user gesture that called this, which the caller owns, not this file. */
+    downloadAuditLog: async (matterId: string) => {
       const token = await getAccessToken();
-      const res = await fetch(`${baseUrl}/audit/export`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`${baseUrl}/matters/${matterId}/audit/export`, { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new ApiError(body.error ?? `Request failed: ${res.status}`, res.status);

@@ -7,6 +7,7 @@ import {
   toVectorLiteral,
   recordAiUsage,
   MATTER_DOCUMENT_TREE_CTE,
+  enableIterativeVectorScan,
 } from "@xbundle/edd-workbench-core";
 
 // mergeParams — mounted at /api/matters/:matterId/ask (see index.ts),
@@ -76,8 +77,14 @@ askRouter.post("/", async (req: Request<{ matterId: string }>, res, next) => {
     // column is insertion-order, not tree order, and citing it directly
     // used to show a different number than the results table for the same
     // document (see documentTree.ts's own comment for why they diverge).
-    const rows = await withOrgSession(orgId, (client) =>
-      client.query<RetrievedChunkRow>(
+    const rows = await withOrgSession(orgId, async (client) => {
+      // Must run inside this same transaction as the query below (SET
+      // LOCAL) — without it, the HNSW index returns the globally-nearest
+      // chunks and `dc.matter_id = $1` then filters them, so this can come
+      // back with fewer than RETRIEVAL_LIMIT rows (or none) even when the
+      // matter genuinely holds close matches. See enableIterativeVectorScan.
+      await enableIterativeVectorScan(client);
+      return client.query<RetrievedChunkRow>(
         `${MATTER_DOCUMENT_TREE_CTE}
          SELECT dc.document_id, dc.text, dc.embedding <=> $2::vector AS distance,
                 n.display_guid_number AS guid_number, d.original_filename
@@ -88,8 +95,8 @@ askRouter.post("/", async (req: Request<{ matterId: string }>, res, next) => {
          ORDER BY dc.embedding <=> $2::vector
          LIMIT $3`,
         [matterId, toVectorLiteral(questionEmbedding), RETRIEVAL_LIMIT],
-      ),
-    );
+      );
+    });
 
     // Which documents are relevant is decided here, deterministically, by
     // retrieval — not left to the generation model to also get right. A

@@ -2,6 +2,7 @@ export { pool } from "./pool.js";
 export { withOrgSession } from "./session.js";
 export { formatGuid, initMatterGuidCounter, nextMatterGuid, reserveMatterGuidBlock } from "./guidCounter.js";
 export { MATTER_DOCUMENT_TREE_CTE } from "./documentTree.js";
+export { enableIterativeVectorScan } from "./vectorSearch.js";
 export { recordAuditEvent, recordAuditEvents, type AuditAction, type AuditEvent } from "./auditLog.js";
 export { s3Client, DOCUMENTS_BUCKET, deleteS3ObjectsBestEffort } from "./s3.js";
 export { sqsClient } from "./sqs.js";

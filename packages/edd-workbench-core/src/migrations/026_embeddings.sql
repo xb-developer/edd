@@ -45,10 +45,20 @@ CREATE POLICY document_chunks_isolation ON document_chunks
 -- pgvector's ANN index types (ivfflat/hnsw) are built on the vector column
 -- alone; there is no native multi-column vector+scalar index. A plain
 -- btree on matter_id (for the isolation WHERE filter) alongside an hnsw
--- index on embedding (for the similarity search itself) is the standard,
--- correct pattern at this scale — the planner combines them — not a gap
--- relative to the original cost/architecture research, just a correction
--- to how pgvector indexing actually works.
+-- index on embedding (for the similarity search itself) is the standard
+-- pattern at this scale.
+--
+-- CORRECTION (this comment previously claimed "the planner combines
+-- them" — it does not, and that claim was wrong): for a filtered
+-- similarity search, HNSW finds the rows nearest GLOBALLY and matter_id
+-- (plus the RLS org_id predicate) is applied to those candidates
+-- afterwards. So a `WHERE matter_id = $1 ORDER BY embedding <=> $2
+-- LIMIT n` can return FEWER than n rows — a recall bug, not just a slow
+-- query — once more than one matter holds a meaningful share of this
+-- table. The runtime fix is pgvector 0.8's iterative scan; see
+-- vectorSearch.ts's enableIterativeVectorScan, which ask.ts sets inside
+-- the same transaction as the query. The indexes below are unchanged and
+-- still correct.
 CREATE INDEX document_chunks_matter_id_idx ON document_chunks (matter_id);
 CREATE INDEX document_chunks_embedding_hnsw_idx ON document_chunks USING hnsw (embedding vector_cosine_ops);
 

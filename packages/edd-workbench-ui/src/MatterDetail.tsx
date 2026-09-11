@@ -9,6 +9,7 @@ import { AskResultPanel } from "./AskResultPanel";
 import { FilterPanel, type IngestStatusFilter } from "./FilterPanel";
 import { DocumentPropertiesPanel } from "./DocumentPropertiesPanel";
 import { useViewerWindow } from "./viewer-window/useViewerWindow";
+import { useDocumentDetail } from "./useDocumentDetail";
 import { useDocumentImport } from "./import/useDocumentImport";
 import { formatSize, formatDate, displayFilename, stripExtension } from "./format";
 import { sortDocuments, type SortableColumn, type SortDirection } from "./sortDocuments";
@@ -600,7 +601,11 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
     [filteredDocuments, sortColumn, sortDirection],
   );
 
-  const selectedDocument = sortedDocuments?.find((d) => d.documentId === selectedDocumentId) ?? null;
+  const selectedListDocument = sortedDocuments?.find((d) => d.documentId === selectedDocumentId) ?? null;
+  // The list row carries everything except `metadata` (the server omits
+  // it from list responses now); this fills that one field in on demand,
+  // cached, and falls back to the list row while the fetch is in flight.
+  const selectedDocument = useDocumentDetail(api, matterId, selectedListDocument);
   const selectedIndex = sortedDocuments?.findIndex((d) => d.documentId === selectedDocumentId) ?? -1;
   // Walks the *filtered/displayed* list, not the full matter — matches what
   // the reviewer is actually looking at. Server-ordered by guid_number (see

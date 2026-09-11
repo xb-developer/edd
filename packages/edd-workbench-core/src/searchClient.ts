@@ -1,3 +1,5 @@
+// NOTE: this file is Elasticsearch (full-text search). pgvector's own
+// ANN-recall setting lives in vectorSearch.ts.
 // Self-hosted Elasticsearch (see infra/edd-workbench/lib/edd-workbench-stack.ts's
 // ElasticsearchService) — always on, unlike the GPU-backed embedding/
 // generation services, so there's no business-hours schedule to work around

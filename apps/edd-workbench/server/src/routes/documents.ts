@@ -77,26 +77,45 @@ interface DocumentRow {
   upload_batch_id: string;
 }
 
-// Both queries below select from the same shared tree CTE (see
-// documentTree.ts) — two self-LEFT-JOINs against its own `numbered` table,
-// one to the direct parent (parent_document_id) and one to the family root
+// Every column toDocumentDTO reads EXCEPT metadata. metadata is a jsonb
+// holding a document's whole extracted content — mammoth HTML, a PDF's
+// full text layer, every row of an xlsx — so including it in a LIST
+// response means shipping the entire matter's extracted text to the
+// browser on every load. Only the one selected document ever needs it (the
+// viewer and the properties panel), and that's what GET /:id is for.
+const DOCUMENT_LIST_COLUMNS = `
+  d.id, d.parent_document_id, d.family_document_id, d.depth, d.original_filename,
+  d.extension, d.size_bytes, d.file_modified_at, d.content_type_detected,
+  d.ingest_status, d.ingest_error, d.ocr_status, d.title, d.author, d.subject,
+  d.doc_date, d.content_modified_at, d.to_addresses, d.cc_addresses,
+  d.content_warning, d.created_at, d.upload_batch_id
+`;
+
+// Both routes select from the same shared tree CTE (see documentTree.ts) —
+// two self-LEFT-JOINs against its own `numbered` table, one to the direct
+// parent (parent_document_id) and one to the family root
 // (family_document_id, migration 018), so a child's row already carries
 // both its parent's and its family root's DISPLAY guid number, no separate
 // lookup needed. The displayed guid/parentGuid/familyGuid are computed from
 // each document's current tree position, not the raw guid_number column
-// (see documentTree.ts's own comment for why) — aliased here to the same
-// column names toDocumentDTO already reads, so that function needs no
-// changes. Kept as one constant so the two routes below can't drift apart
-// on which columns are actually selected.
-const DOCUMENT_SELECT = `
+// (see documentTree.ts's own comment for why) — aliased to the same column
+// names toDocumentDTO already reads, so that function needs no changes.
+// Built from one function so the two can't drift apart on anything but the
+// metadata column they deliberately differ on.
+function documentSelect(columns: string): string {
+  return `
   ${MATTER_DOCUMENT_TREE_CTE}
-  SELECT d.*, n.display_guid_number AS guid_number,
+  SELECT ${columns}, n.display_guid_number AS guid_number,
          p.display_guid_number AS parent_guid_number, f.display_guid_number AS family_guid_number
   FROM numbered n
   JOIN documents d ON d.id = n.id
   LEFT JOIN numbered p ON p.id = n.parent_document_id
   LEFT JOIN numbered f ON f.id = n.family_document_id
 `;
+}
+
+const DOCUMENT_LIST_SELECT = documentSelect(DOCUMENT_LIST_COLUMNS);
+const DOCUMENT_DETAIL_SELECT = documentSelect("d.*");
 
 function toDocumentDTO(row: DocumentRow) {
   return {
@@ -127,7 +146,9 @@ function toDocumentDTO(row: DocumentRow) {
     contentModifiedAt: row.content_modified_at,
     toAddresses: row.to_addresses,
     ccAddresses: row.cc_addresses,
-    metadata: row.metadata,
+    // undefined (not null) when this row came from the list projection,
+    // which omits the column entirely — see DOCUMENT_LIST_COLUMNS.
+    metadata: (row.metadata ?? null) as Record<string, unknown> | null,
     contentWarning: row.content_warning,
     createdAt: row.created_at,
     uploadBatchId: row.upload_batch_id,
@@ -135,11 +156,14 @@ function toDocumentDTO(row: DocumentRow) {
 }
 
 // Unpaginated for now — server-side pagination/filtering is explicitly
-// Milestone 3's job (build plan §5), not this one. Includes full metadata
-// (not just summary fields) so the viewer can render eml/msg straight from
-// this response with no second fetch — revisit if/when matters grow large
-// enough that shipping every row's full jsonb blob in one list response
-// becomes the actual bottleneck, not before.
+// Milestone 3's job (build plan §5), not this one.
+//
+// Deliberately EXCLUDES metadata (see DOCUMENT_LIST_COLUMNS). It used to
+// include it so the viewer could render eml/msg straight from this
+// response with no second fetch; that traded one small per-selection fetch
+// for shipping the whole matter's extracted text on every load, which is
+// the wrong way round. The client now fetches the selected document's full
+// row via GET /:id and caches it (see useDocumentDetail.ts).
 documentsRouter.get("/", async (req: Request<{ matterId: string }>, res, next) => {
   try {
     const { orgId } = req.eddContext!;
@@ -154,7 +178,7 @@ documentsRouter.get("/", async (req: Request<{ matterId: string }>, res, next) =
     // message and reprocessed — by which point unrelated later documents
     // may already have consumed intervening numbers.
     const rows = await withOrgSession(orgId, (client) =>
-      client.query<DocumentRow>(`${DOCUMENT_SELECT} ORDER BY n.sort_path`, [matterId]),
+      client.query<DocumentRow>(`${DOCUMENT_LIST_SELECT} ORDER BY n.sort_path`, [matterId]),
     );
 
     res.json(rows.rows.map(toDocumentDTO));
@@ -213,7 +237,7 @@ documentsRouter.get("/:id", async (req: Request<{ matterId: string; id: string }
     // matter's tree order, so this still walks the full matter even though
     // only one row's worth of output is returned.
     const rows = await withOrgSession(orgId, (client) =>
-      client.query<DocumentRow>(`${DOCUMENT_SELECT} WHERE n.id = $2`, [matterId, documentId]),
+      client.query<DocumentRow>(`${DOCUMENT_DETAIL_SELECT} WHERE n.id = $2`, [matterId, documentId]),
     );
     if (rows.rowCount === 0) {
       res.status(404).json({ error: "Document not found" });

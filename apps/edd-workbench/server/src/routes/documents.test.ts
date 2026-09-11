@@ -498,10 +498,44 @@ describe("documents router — list", () => {
       title: "Second subject",
       author: "Bob <bob@example.com>",
     });
-    expect(response.body[1].metadata).toEqual({ bodyText: "hi" });
+    // The LIST response deliberately carries no metadata — it's a jsonb
+    // holding each document's whole extracted content, so including it
+    // shipped the entire matter's extracted text on every load. The single
+    // document route below is what the viewer uses for it.
+    expect(response.body[1].metadata).toBeNull();
     // No parent — a document with no children is its own family, never null.
     expect(response.body[0].familyGuid).toBe("000001");
     expect(response.body[1].familyGuid).toBe("000002");
+  });
+
+  it("returns the full metadata the list omits, for the one document the viewer actually needs it for", async () => {
+    const { orgId, matterId, userId } = await createTestOrgAndMatter("detail-metadata");
+    orgIdsToClean.push(orgId);
+
+    const documentId = randomUUID();
+    await withOrgSession(orgId, (client) =>
+      client.query(
+        `INSERT INTO documents (id, org_id, matter_id, family_document_id, depth, guid_number, original_filename, extension, size_bytes, s3_key, content_type_detected, ingest_status, metadata)
+         VALUES ($1, $2, $3, $1, 0, 1, 'only.eml', 'eml', 10, 'tenants/x/original.eml', 'eml', 'ready', $4)`,
+        [documentId, orgId, matterId, JSON.stringify({ bodyText: "hi" })],
+      ),
+    );
+
+    const app = buildTestApp({ orgId, userId, role: "admin", email: "tester@example.com" });
+
+    const list = await request(app).get(`/api/matters/${matterId}/documents`).send();
+    expect(list.status).toBe(200);
+    expect(list.body[0].metadata).toBeNull();
+
+    const detail = await request(app).get(`/api/matters/${matterId}/documents/${documentId}`).send();
+    expect(detail.status).toBe(200);
+    expect(detail.body.metadata).toEqual({ bodyText: "hi" });
+    // Everything else must match the list row exactly — the two projections
+    // differ on metadata and nothing else.
+    expect(detail.body.guid).toBe(list.body[0].guid);
+    expect(detail.body.familyGuid).toBe(list.body[0].familyGuid);
+    expect(detail.body.originalFilename).toBe(list.body[0].originalFilename);
+    expect(detail.body.ingestStatus).toBe(list.body[0].ingestStatus);
   });
 
   it("resolves familyGuid to the parent's formatted GUID for an attachment expanded into its own document row (depth 1)", async () => {

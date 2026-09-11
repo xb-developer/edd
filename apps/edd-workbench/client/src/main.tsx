@@ -12,6 +12,10 @@ import "@fontsource/inter/400.css";
 import "@fontsource/inter/600.css";
 import "@fontsource/ibm-plex-mono/400.css";
 import "@fontsource/ibm-plex-mono/600.css";
+// theme.css first, deliberately: it carries `@import "tailwindcss"`, and
+// Tailwind's preflight must be layered BEFORE the app's own resets so
+// styles.css's `*`/`body`/`button` rules still win where they disagree.
+import "@xbundle/edd-workbench-ui/src/theme.css";
 import "@xbundle/edd-workbench-ui/src/styles.css";
 
 // Set once at module load, not per-render — this never changes for the

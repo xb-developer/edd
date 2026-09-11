@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { ConfigProvider } from "antd";
+import { antdTheme } from "./antdTheme";
 import { createApiClient, ApiError } from "./api";
 import type { DocumentDTO } from "./types";
 import { DocumentViewer } from "./DocumentViewer";
@@ -22,7 +24,18 @@ export interface DocumentViewerWindowProps {
  * potentially-large docx/xlsx metadata blobs through structured-clone
  * across realms).
  */
-export function DocumentViewerWindow({ apiBaseUrl = "http://localhost:4430/api", getAccessToken, matterId, sessionId, initialDocumentId }: DocumentViewerWindowProps) {
+export function DocumentViewerWindow(props: DocumentViewerWindowProps) {
+  // A real separate window with its own document and its own React root, so
+  // antd's own style injection lands correctly here without a StyleProvider
+  // — unlike PiP mode, which shares the opener's realm (see MatterDetail).
+  return (
+    <ConfigProvider theme={antdTheme}>
+      <DocumentViewerWindowInner {...props} />
+    </ConfigProvider>
+  );
+}
+
+function DocumentViewerWindowInner({ apiBaseUrl = "http://localhost:4430/api", getAccessToken, matterId, sessionId, initialDocumentId }: DocumentViewerWindowProps) {
   const [api] = useState(() => createApiClient(apiBaseUrl, getAccessToken));
   const [documentId, setDocumentId] = useState(initialDocumentId);
   const [document, setDocument] = useState<DocumentDTO | null>(null);

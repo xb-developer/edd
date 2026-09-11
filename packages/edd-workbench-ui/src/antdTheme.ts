@@ -1,0 +1,73 @@
+import type { ThemeConfig } from "antd";
+
+/**
+ * Ant Design's theme, expressed in the same design tokens theme.css defines
+ * for Tailwind.
+ *
+ * This is the seam between the two systems, and it is deliberate. antd 6
+ * styles its widget INTERNALS through its own CSS-in-JS design system —
+ * there is no Tailwind class to reach the inside of a Select's dropdown or
+ * a Table's sticky header. So the split is:
+ *
+ *   - antd tokens (here)  — widget internals: control heights, borders,
+ *                           focus rings, the colours antd paints itself
+ *   - Tailwind utilities  — everything the app itself lays out: page
+ *                           structure, panels, spacing, custom chrome
+ *
+ * Values are repeated as literals rather than read from CSS custom
+ * properties because antd needs them at JS evaluation time to compute
+ * derived colours (hover, active, disabled shades). Keep them in step with
+ * theme.css — that file is the source of truth, this is its mirror.
+ */
+const PAPER = "#f5f5f3";
+const PANEL = "#ffffff";
+const INK = "#1b2130";
+const INK_SOFT = "#5b6272";
+const LINE = "#e1e3e8";
+const NAVY = "#1f2a44";
+const SEAL = "#a6362c";
+const AMBER = "#b4780c";
+
+export const antdTheme: ThemeConfig = {
+  token: {
+    colorPrimary: NAVY,
+    colorError: SEAL,
+    colorWarning: AMBER,
+    colorText: INK,
+    colorTextSecondary: INK_SOFT,
+    colorBorder: LINE,
+    colorBorderSecondary: "#edeef1",
+    colorBgBase: PAPER,
+    colorBgContainer: PANEL,
+    fontFamily: '"Inter", system-ui, sans-serif',
+    fontFamilyCode: '"IBM Plex Mono", ui-monospace, monospace',
+    // 13px, matching the density this app was designed at — antd's own
+    // default is 14px, which visibly loosens every table row.
+    fontSize: 13,
+    borderRadius: 4,
+    // The POC's design has essentially flat surfaces; antd's default
+    // elevation would read as a different product.
+    boxShadow: "none",
+    boxShadowSecondary: "0 2px 8px rgba(27, 33, 48, 0.08)",
+  },
+  components: {
+    Table: {
+      // 34px rows — the same --spacing-row the rest of the layout sizes
+      // against. antd's "small" default is taller.
+      cellPaddingBlockSM: 6,
+      cellPaddingInlineSM: 8,
+      headerBg: "#eef1f6",
+      headerColor: INK,
+      rowSelectedBg: "#eef1f6",
+      rowSelectedHoverBg: "#e3e8f1",
+      borderColor: LINE,
+    },
+    Button: {
+      primaryShadow: "none",
+      defaultShadow: "none",
+    },
+    Modal: {
+      titleFontSize: 14,
+    },
+  },
+};

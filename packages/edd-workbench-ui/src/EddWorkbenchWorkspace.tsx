@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { ConfigProvider } from "antd";
+import { antdTheme } from "./antdTheme";
 import { createApiClient } from "./api";
 import type { MatterDTO } from "./types";
 import { MatterDetail } from "./MatterDetail";
@@ -25,7 +27,22 @@ const SELECTED_MATTER_STORAGE_KEY = "edd-workbench:selectedMatterId";
 // the single topbar + tree-panel layout. Matter switching lives in a
 // top-left <select>; a brand-new org with zero matters skips straight to a
 // freshly created one instead of showing an empty state.
-export function EddWorkbenchWorkspace({ apiBaseUrl = "http://localhost:4430/api", getAccessToken, onLogout }: EddWorkbenchWorkspaceProps) {
+/**
+ * Applies the shared Ant Design theme (see antdTheme.ts) to the whole
+ * workspace. A wrapper rather than a provider inside the component below
+ * because that component has three separate early-return render paths
+ * (no matters, loading, loaded) and every one of them renders antd
+ * widgets — wrapping once here is the only way they can't drift apart.
+ */
+export function EddWorkbenchWorkspace(props: EddWorkbenchWorkspaceProps) {
+  return (
+    <ConfigProvider theme={antdTheme}>
+      <EddWorkbenchWorkspaceInner {...props} />
+    </ConfigProvider>
+  );
+}
+
+function EddWorkbenchWorkspaceInner({ apiBaseUrl = "http://localhost:4430/api", getAccessToken, onLogout }: EddWorkbenchWorkspaceProps) {
   const [api] = useState(() => createApiClient(apiBaseUrl, getAccessToken));
   const [matters, setMatters] = useState<MatterDTO[] | null>(null);
   const [error, setError] = useState<string | null>(null);

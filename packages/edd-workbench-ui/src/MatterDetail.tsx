@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { ConfigProvider } from "antd";
+import { StyleProvider } from "@ant-design/cssinjs";
+import { antdTheme } from "./antdTheme";
 import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import type { ApiClient } from "./api";
 import type { DocumentDTO, TagSetDTO, AskResultDTO } from "./types";
@@ -1184,10 +1187,20 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
             {selectedDocument &&
               viewerWindow.pipContainer &&
               createPortal(
-                <>
-                  <DocumentPropertiesPanel document={selectedDocument} />
-                  <DocumentViewer api={api} matterId={matterId} document={selectedDocument} />
-                </>,
+                // StyleProvider + ConfigProvider, even though this is the
+                // SAME React tree and realm as the main window: antd
+                // injects each component's CSS-in-JS into the document its
+                // provider points at, lazily, the first time that component
+                // renders. Without redirecting it at the PiP document, those
+                // rules land in the OPENER's head and the PiP viewer renders
+                // unstyled. copyStylesInto (useViewerWindow.ts) only copies
+                // what already exists at open time, so it can't cover this.
+                <StyleProvider container={viewerWindow.pipContainer.ownerDocument.head}>
+                  <ConfigProvider theme={antdTheme} getPopupContainer={() => viewerWindow.pipContainer!}>
+                    <DocumentPropertiesPanel document={selectedDocument} />
+                    <DocumentViewer api={api} matterId={matterId} document={selectedDocument} />
+                  </ConfigProvider>
+                </StyleProvider>,
                 viewerWindow.pipContainer,
               )}
             {selectedDocument && (

@@ -1,0 +1,78 @@
+/*
+ * Tailwind entry point and the single source of truth for this app's design
+ * tokens.
+ *
+ * The 17 CSS custom properties styles.css already defined (--paper, --ink,
+ * --navy, --seal, --mono …) were effectively a hand-rolled token layer, so
+ * they map onto Tailwind v4's `@theme` almost one-for-one. Declaring them
+ * here means the SAME values drive three consumers that previously would
+ * have had to be kept in sync by hand:
+ *
+ *   1. Tailwind utilities  — `bg-paper`, `text-ink-soft`, `border-line`
+ *   2. Ant Design's theme  — antdTheme.ts reads the same literals
+ *   3. Plain CSS still in  — styles.css keeps working via the `--color-*`
+ *      styles.css              custom properties `@theme` emits
+ *
+ * `@theme` (not `:root`) is what registers them with Tailwind as real
+ * tokens; it emits them as custom properties on :root anyway, so the
+ * existing `var(--paper)` references in styles.css keep resolving during
+ * the migration. Those old names are declared alongside for exactly that
+ * reason and can go once styles.css does.
+ */
+@import "tailwindcss";
+
+/* Tailwind scans the files it can see from the importing project. The UI
+   components live in a separate workspace package consumed as source, so
+   its directory has to be named explicitly or every className in it is
+   treated as unused and its utilities are never generated. */
+@source "../../../packages/edd-workbench-ui/src";
+
+@theme {
+  --color-paper: #f5f5f3;
+  --color-panel: #ffffff;
+  --color-ink: #1b2130;
+  --color-ink-soft: #5b6272;
+  --color-line: #e1e3e8;
+  --color-line-soft: #edeef1;
+  --color-navy: #1f2a44;
+  --color-navy-soft: #eef1f6;
+  --color-seal: #a6362c;
+  --color-seal-soft: #f7e9e7;
+  --color-amber: #b4780c;
+  --color-amber-soft: #fbf0dc;
+  --color-slate: #5b6272;
+  --color-slate-soft: #eef0f3;
+
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  /* The document table's row height — a real layout constant shared by the
+     table, its virtualised row measurement, and the panels that size
+     against it, not a one-off value. */
+  --spacing-row: 34px;
+}
+
+/*
+ * The original token names, kept as aliases so the not-yet-migrated parts
+ * of styles.css continue to resolve while components move over to Tailwind
+ * utilities one at a time. Delete this block together with styles.css.
+ */
+:root {
+  --paper: var(--color-paper);
+  --panel: var(--color-panel);
+  --ink: var(--color-ink);
+  --ink-soft: var(--color-ink-soft);
+  --line: var(--color-line);
+  --line-soft: var(--color-line-soft);
+  --navy: var(--color-navy);
+  --navy-soft: var(--color-navy-soft);
+  --seal: var(--color-seal);
+  --seal-soft: var(--color-seal-soft);
+  --amber: var(--color-amber);
+  --amber-soft: var(--color-amber-soft);
+  --slate: var(--color-slate);
+  --slate-soft: var(--color-slate-soft);
+  --mono: var(--font-mono);
+  --sans: var(--font-sans);
+  --row-h: var(--spacing-row);
+}

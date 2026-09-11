@@ -17,6 +17,8 @@
   },
   "dependencies": {
     "@aiden0z/pptx-renderer": "^1.2.4",
+    "@ant-design/cssinjs": "^2.1.2",
+    "antd": "^6.6.3",
     "dompurify": "^3.4.13"
   }
 }

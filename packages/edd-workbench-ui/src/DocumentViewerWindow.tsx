@@ -88,7 +88,7 @@ function DocumentViewerWindowInner({ apiBaseUrl = "http://localhost:4430/api", g
   }
   if (error) return <p className="rounded border border-dashed border-line p-6 text-center text-xs text-ink-soft">{error}</p>;
   if (!documentId) return <p className="p-4 text-center text-xs italic text-ink-soft">No document selected.</p>;
-  if (!document) return <p className="px-0.5 py-1 text-[11.5px] italic text-ink-soft">Loading document…</p>;
+  if (!document) return <p className="px-0.5 py-1 text-xs italic text-ink-soft">Loading document…</p>;
 
   return <DocumentViewer api={api} matterId={matterId} document={document} />;
 }

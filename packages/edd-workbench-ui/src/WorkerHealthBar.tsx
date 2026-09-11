@@ -94,13 +94,13 @@ export function WorkerHealthBar({ api, matterId }: WorkerHealthBarProps) {
     };
   }, [api]);
 
-  if (error) return <span className="flex gap-2 text-[11px] text-white/75">Worker status unavailable</span>;
+  if (error) return <span className="flex gap-2 text-xs text-white/75">Worker status unavailable</span>;
   if (!status) return null;
 
   const searchMismatch = searchHealth && searchHealth.postgresDocCount - searchHealth.esDocCount > SEARCH_HEALTH_MISMATCH_THRESHOLD;
 
   return (
-    <span className="flex gap-2 text-[11px] text-white/75">
+    <span className="flex gap-2 text-xs text-white/75">
       {status.queues.map((queue) => {
         const ageSeconds = secondsAgo(queue.heartbeat?.lastTickAt ?? null);
         const stalled = ageSeconds === null || ageSeconds * 1000 > STALE_TICK_MS;

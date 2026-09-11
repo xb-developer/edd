@@ -97,7 +97,10 @@
     font-family: var(--font-sans);
     background: var(--color-paper);
     color: var(--color-ink);
-    font-size: 13px;
+    /* One size for the whole app, matching the document table's body
+       text — see .ant-table in styles.css. Everything that used to sit at
+       10-11.5px was smaller than the table it sat beside. */
+    font-size: 12px;
     -webkit-font-smoothing: antialiased;
   }
   ::selection {

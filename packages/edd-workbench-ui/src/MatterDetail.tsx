@@ -513,7 +513,7 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
 
       {documentImport.importProgress && (
         <div className="flex items-center gap-3.5 border-b border-[#ead6a5] bg-amber-soft px-5 py-2">
-          <span className="flex-none whitespace-nowrap text-[11.5px] font-semibold text-[#6b4c05]">
+          <span className="flex-none whitespace-nowrap text-xs font-semibold text-[#6b4c05]">
             Importing document {documentImport.importProgress.current} of {documentImport.importProgress.total}
             {documentImport.importProgress.errors > 0 ? ` — ${documentImport.importProgress.errors} failed` : ""}
           </span>
@@ -528,7 +528,7 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
 
       {documentImport.ingestProgress && (
         <div className="flex items-center gap-3.5 border-b border-[#ead6a5] bg-amber-soft px-5 py-2">
-          <span className="flex-none whitespace-nowrap text-[11.5px] font-semibold text-[#6b4c05]">
+          <span className="flex-none whitespace-nowrap text-xs font-semibold text-[#6b4c05]">
             {documentImport.ingestProgress.gaveUp
               ? `${documentImport.ingestProgress.remaining} document${documentImport.ingestProgress.remaining === 1 ? "" : "s"} still processing — reload to check`
               : `Processing ${documentImport.ingestProgress.total - documentImport.ingestProgress.remaining} of ${documentImport.ingestProgress.total} document${documentImport.ingestProgress.total === 1 ? "" : "s"}…`}
@@ -560,7 +560,7 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
               ×
             </Button>
           </div>
-          <ul className="m-0 mt-2 list-none p-0 text-[11.5px] leading-[1.7] [&_li]:truncate">
+          <ul className="m-0 mt-2 list-none p-0 text-xs leading-[1.7] [&_li]:truncate">
             {documentImport.importFailures.map((failure, i) => (
               <li key={i}>
                 <span className="fname">{failure.filename}</span> <span className="text-ink-soft">— {failure.error}</span>
@@ -571,7 +571,7 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
       )}
 
       {!documents || !filteredDocuments || !sortedDocuments ? (
-        <p className="px-0.5 py-1 text-[11.5px] italic text-ink-soft" style={{ padding: 16 }}>
+        <p className="px-0.5 py-1 text-xs italic text-ink-soft" style={{ padding: 16 }}>
           Loading…
         </p>
       ) : (
@@ -608,12 +608,12 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
 
           <section className="flex min-w-[200px] flex-[1_1_0] flex-col overflow-hidden">
             <div className="flex items-center gap-2.5 border-b border-line bg-panel px-4 py-2.5">
-              <span className="font-mono text-[11.5px] text-ink-soft">
+              <span className="font-mono text-xs text-ink-soft">
                 DOCUMENTS {documents.length} FILTERED {filteredDocuments.length} CHECKED {checkedDocumentIds.size} SIZE{" "}
                 {formatSize(totalFilteredSizeBytes)}
               </span>
               {checkedDocumentIds.size > 0 && (
-                <span className="font-mono text-[11.5px] text-ink-soft">
+                <span className="font-mono text-xs text-ink-soft">
                   {hiddenCheckedCount > 0 ? `${hiddenCheckedCount} not shown by current filter` : null}
                   <Button type="text" size="small" onClick={() => setCheckedDocumentIds(new Set())}>
                     Clear
@@ -698,7 +698,7 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
           <section className="flex min-h-0 flex-[0_0_auto] flex-col overflow-hidden border-l border-line bg-panel" style={{ flexBasis: rightResize.size }} ref={rightResize.targetRef as React.RefObject<HTMLElement>}>
             {selectedDocument && (
               <div className="flex flex-none items-center justify-between gap-2 border-b border-line bg-panel px-4 pt-2.5 pb-[9px]">
-                <h2 className="m-0 mb-2.5 text-[10.5px] font-semibold tracking-[0.08em] text-ink-soft uppercase">Preview</h2>
+                <h2 className="m-0 mb-2.5 text-xs font-semibold tracking-[0.08em] text-ink-soft uppercase">Preview</h2>
                 {viewerWindow.state === "docked" ? (
                   // "Float on top" (PiP) button removed from the UI — the
                   // underlying popOutPiP/pipSupported functionality in

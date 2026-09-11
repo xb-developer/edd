@@ -36,7 +36,7 @@ export interface CodingPanelProps {
 // Tag toggles are deliberately NOT antd Buttons: they have three states, and
 // antd's Button has no notion of "partially applied". Styling is Tailwind;
 // only the state logic lives in the component.
-const TAG_TOGGLE_BASE = "rounded-[14px] border px-2.5 py-[5px] text-[11.5px] font-semibold transition-colors";
+const TAG_TOGGLE_BASE = "rounded-[14px] border px-2.5 py-[5px] text-xs font-semibold transition-colors";
 const TAG_TOGGLE_STATE = {
   // Deliberately the same light blue for every tag regardless of that tag's
   // own configured colour (still used as an identification swatch in
@@ -150,7 +150,7 @@ export function CodingPanel({
   return (
     <div className="flex min-h-[60px] flex-1 flex-col overflow-hidden">
       <div className="flex flex-none items-center justify-between gap-2 border-b border-line bg-panel px-4 pt-2.5 pb-[9px]">
-        <h2 className="m-0 mb-2.5 text-[10.5px] font-semibold tracking-[0.08em] text-ink-soft uppercase">{isBulkMode ? `Applying to ${bulkSelectedDocumentIds.size} selected document${bulkSelectedDocumentIds.size === 1 ? "" : "s"}` : "Coding"}</h2>
+        <h2 className="m-0 mb-2.5 text-xs font-semibold tracking-[0.08em] text-ink-soft uppercase">{isBulkMode ? `Applying to ${bulkSelectedDocumentIds.size} selected document${bulkSelectedDocumentIds.size === 1 ? "" : "s"}` : "Coding"}</h2>
         {isBulkMode ? (
           <Button
             size="small"
@@ -189,7 +189,7 @@ export function CodingPanel({
         {!error &&
           tagSets.map((tagSet) => (
             <div key={tagSet.id} className="mb-6">
-              <h2 className="m-0 mb-2.5 text-[10.5px] font-semibold tracking-[0.08em] text-ink-soft uppercase">{tagSet.name}</h2>
+              <h2 className="m-0 mb-2.5 text-xs font-semibold tracking-[0.08em] text-ink-soft uppercase">{tagSet.name}</h2>
               <div className="mb-3.5 flex flex-wrap gap-1.5">
                 {tagSet.tags.map((tag) => {
                   if (!isBulkMode) {
@@ -233,9 +233,9 @@ export function CodingPanel({
               </div>
             </div>
           ))}
-        {!error && tagSets.length === 0 && <p className="px-0.5 py-1 text-[11.5px] italic text-ink-soft">No tag sets configured for this matter.</p>}
+        {!error && tagSets.length === 0 && <p className="px-0.5 py-1 text-xs italic text-ink-soft">No tag sets configured for this matter.</p>}
         <div className="mb-6">
-          <h2 className="m-0 mb-2.5 text-[10.5px] font-semibold tracking-[0.08em] text-ink-soft uppercase">Custom code</h2>
+          <h2 className="m-0 mb-2.5 text-xs font-semibold tracking-[0.08em] text-ink-soft uppercase">Custom code</h2>
           <Space.Compact size="small" className="w-full">
             <Input
               placeholder="New code name…"

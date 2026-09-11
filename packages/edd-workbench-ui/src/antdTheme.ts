@@ -55,9 +55,10 @@ export const antdTheme: ThemeConfig = {
     colorBgContainer: PANEL,
     fontFamily: '"Inter", system-ui, sans-serif',
     fontFamilyCode: '"IBM Plex Mono", ui-monospace, monospace',
-    // 13px, matching the density this app was designed at — antd's own
-    // default is 14px, which visibly loosens every table row.
-    fontSize: 13,
+    // 12px — the same size as the document table's body text, which is the
+    // reference every other piece of text in the app is matched to. antd's
+    // own default is 14px, which visibly loosens every row.
+    fontSize: 12,
     borderRadius: 4,
     // The POC's design has essentially flat surfaces; antd's default
     // elevation would read as a different product.

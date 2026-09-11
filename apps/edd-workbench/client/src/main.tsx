@@ -86,7 +86,7 @@ function AppShell() {
   if (isLoading) {
     return (
       <div className="flex h-screen items-center justify-center bg-paper">
-        <p className="px-0.5 py-1 text-[11.5px] italic text-ink-soft">Loading…</p>
+        <p className="px-0.5 py-1 text-xs italic text-ink-soft">Loading…</p>
       </div>
     );
   }
@@ -96,7 +96,7 @@ function AppShell() {
       <div className="flex h-screen items-center justify-center bg-paper">
         <div className="w-[420px] max-w-[90vw] rounded-lg border border-line bg-panel px-[26px] py-7 text-center shadow-[0_4px_24px_rgba(27,33,48,0.08)]">
           <div className="mb-[18px] flex items-baseline justify-center gap-2">
-            <span className="flex h-[22px] w-[22px] flex-none items-center justify-center rounded-[3px] border-[1.5px] border-navy font-mono text-[11px] font-semibold text-navy">
+            <span className="flex h-[22px] w-[22px] flex-none items-center justify-center rounded-[3px] border-[1.5px] border-navy font-mono text-xs font-semibold text-navy">
               Co
             </span>
             <h1 className="m-0 text-base font-semibold">Collate</h1>
@@ -121,12 +121,12 @@ function AppShell() {
         <div className="flex h-screen items-center justify-center bg-paper">
           <div className="w-[420px] max-w-[90vw] rounded-lg border border-line bg-panel px-[26px] py-7 text-center shadow-[0_4px_24px_rgba(27,33,48,0.08)]">
             <div className="mb-[18px] flex items-baseline justify-center gap-2">
-              <span className="flex h-[22px] w-[22px] flex-none items-center justify-center rounded-[3px] border-[1.5px] border-navy font-mono text-[11px] font-semibold text-navy">
+              <span className="flex h-[22px] w-[22px] flex-none items-center justify-center rounded-[3px] border-[1.5px] border-navy font-mono text-xs font-semibold text-navy">
                 Co
               </span>
               <h1 className="m-0 text-base font-semibold">Collate</h1>
             </div>
-            <p className="px-0.5 py-1 text-[11.5px] italic text-ink-soft mb-[18px]">
+            <p className="px-0.5 py-1 text-xs italic text-ink-soft mb-[18px]">
               {message}
             </p>
             <button
@@ -142,7 +142,7 @@ function AppShell() {
     }
     return (
       <div className="flex h-screen items-center justify-center bg-paper">
-        <p className="px-0.5 py-1 text-[11.5px] italic text-ink-soft">Signing you in…</p>
+        <p className="px-0.5 py-1 text-xs italic text-ink-soft">Signing you in…</p>
       </div>
     );
   }
@@ -177,7 +177,7 @@ function ViewerWindowShell({ matterId, documentId, sessionId }: { matterId: stri
   if (isLoading) {
     return (
       <div className="flex h-screen items-center justify-center bg-paper">
-        <p className="px-0.5 py-1 text-[11.5px] italic text-ink-soft">Loading…</p>
+        <p className="px-0.5 py-1 text-xs italic text-ink-soft">Loading…</p>
       </div>
     );
   }

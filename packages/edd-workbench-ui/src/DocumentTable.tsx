@@ -460,13 +460,13 @@ function TagChips({
           the database), so they stay inline — there is no finite set of
           Tailwind classes that could cover them. */}
       <span
-        className="flex-none whitespace-nowrap rounded-[9px] px-[7px] py-0.5 text-[10px] font-semibold"
+        className="flex-none whitespace-nowrap rounded-[9px] px-[7px] py-0.5 text-xs font-semibold"
         style={{ background: `${INGEST_STATUS_COLORS[doc.ingestStatus]}22`, color: INGEST_STATUS_COLORS[doc.ingestStatus] }}
       >
         {doc.ingestStatus}
       </span>
       {doc.contentWarning && (
-        <span className="flex-none whitespace-nowrap rounded-[9px] px-[7px] py-0.5 text-[10px] font-semibold" style={{ background: "#A6362C22", color: "#A6362C" }} title={doc.contentWarning}>
+        <span className="flex-none whitespace-nowrap rounded-[9px] px-[7px] py-0.5 text-xs font-semibold" style={{ background: "#A6362C22", color: "#A6362C" }} title={doc.contentWarning}>
           ⚠ possible injection
         </span>
       )}
@@ -477,7 +477,7 @@ function TagChips({
           ? { background: `${tag.color}22`, color: tag.color }
           : { background: "var(--slate-soft)", color: "var(--ink-soft)" };
         return (
-          <span key={tagId} className="flex-none whitespace-nowrap rounded-[9px] px-[7px] py-0.5 text-[10px] font-semibold" style={style}>
+          <span key={tagId} className="flex-none whitespace-nowrap rounded-[9px] px-[7px] py-0.5 text-xs font-semibold" style={style}>
             {tag.name}
           </span>
         );

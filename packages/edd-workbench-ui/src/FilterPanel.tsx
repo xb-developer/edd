@@ -224,7 +224,7 @@ export function FilterPanel({
   return (
     <section className="min-h-0 flex-[0_0_auto] overflow-y-auto border-r border-line bg-panel px-3.5 py-4" style={style} ref={rootRef as RefObject<HTMLElement> | undefined}>
       <div className="mb-6">
-        <h2 className="m-0 mb-2.5 text-[10.5px] font-semibold tracking-[0.08em] text-ink-soft uppercase">Search</h2>
+        <h2 className="m-0 mb-2.5 text-xs font-semibold tracking-[0.08em] text-ink-soft uppercase">Search</h2>
         <Input
           allowClear
           size="small"
@@ -242,14 +242,14 @@ export function FilterPanel({
         </Button>
         {searchError && <Alert type="warning" showIcon className="mt-1.5" message={searchError} />}
         {searchTotalHits !== null && matchingDocumentCount !== null && searchTotalHits > matchingDocumentCount && (
-          <p className="mt-1.5 text-[11.5px] text-seal">
+          <p className="mt-1.5 text-xs text-seal">
             Showing first {matchingDocumentCount} of {searchTotalHits} matches — narrow your search
           </p>
         )}
       </div>
 
       <div className="mb-6">
-        <h2 className="m-0 mb-2.5 text-[10.5px] font-semibold tracking-[0.08em] text-ink-soft uppercase">Question</h2>
+        <h2 className="m-0 mb-2.5 text-xs font-semibold tracking-[0.08em] text-ink-soft uppercase">Question</h2>
         <Input.TextArea
           rows={3}
           size="small"
@@ -272,9 +272,9 @@ export function FilterPanel({
       </div>
 
       <div className="mb-6">
-        <h2 className="m-0 mb-2.5 text-[10.5px] font-semibold tracking-[0.08em] text-ink-soft uppercase">Tag Filter</h2>
+        <h2 className="m-0 mb-2.5 text-xs font-semibold tracking-[0.08em] text-ink-soft uppercase">Tag Filter</h2>
         {allTags.length === 0 ? (
-          <p className="px-0.5 py-1 text-[11.5px] italic text-ink-soft">No tags configured for this matter.</p>
+          <p className="px-0.5 py-1 text-xs italic text-ink-soft">No tags configured for this matter.</p>
         ) : (
           <>
             <Segmented
@@ -294,7 +294,7 @@ export function FilterPanel({
                   <Checkbox checked={selectedTagIds.includes(tag.id)} onChange={() => onToggleTagId(tag.id)} />
                   <span className="h-[7px] w-[7px] flex-none rounded-full" style={{ background: tag.color ?? "var(--ink-soft)" }} />
                   <span>{tag.name}</span>
-                  <span className="ml-auto font-mono text-[10.5px] text-ink-soft">{countForTag(tag.id)}</span>
+                  <span className="ml-auto font-mono text-xs text-ink-soft">{countForTag(tag.id)}</span>
                 </label>
               ))}
             </div>
@@ -308,7 +308,7 @@ export function FilterPanel({
       </div>
 
       <div className="mb-6">
-        <h2 className="m-0 mb-2.5 text-[10.5px] font-semibold tracking-[0.08em] text-ink-soft uppercase">Processing Filter</h2>
+        <h2 className="m-0 mb-2.5 text-xs font-semibold tracking-[0.08em] text-ink-soft uppercase">Processing Filter</h2>
         <Select<IngestStatusFilter>
           size="small"
           className="mb-1.5 w-full"
@@ -321,7 +321,7 @@ export function FilterPanel({
           }))}
         />
         <RetryIngestButton api={api} matterId={matterId} documentIds={failedSelectedDocumentIds} onRetried={onDocumentsChanged} />
-        <p className="mt-0.5 text-[10.5px] leading-normal text-ink-soft">
+        <p className="mt-0.5 text-xs leading-normal text-ink-soft">
           {failedSelectedDocumentIds.length === 0
             ? "Check failed documents in the table to enable retry."
             : `Retries ingest for the ${failedSelectedDocumentIds.length} currently checked failed document${failedSelectedDocumentIds.length === 1 ? "" : "s"}.`}
@@ -329,9 +329,9 @@ export function FilterPanel({
       </div>
 
       <div className="mb-6">
-        <h2 className="m-0 mb-2.5 text-[10.5px] font-semibold tracking-[0.08em] text-ink-soft uppercase">Export</h2>
+        <h2 className="m-0 mb-2.5 text-xs font-semibold tracking-[0.08em] text-ink-soft uppercase">Export</h2>
         <ExportButtons api={api} matterId={matterId} selectedDocumentIds={selectedDocumentIds} />
-        <p className="mt-0.5 text-[10.5px] leading-normal text-ink-soft">
+        <p className="mt-0.5 text-xs leading-normal text-ink-soft">
           {selectedDocumentIds.size === 0
             ? "Check documents in the table to enable export."
             : `Exports the ${selectedDocumentIds.size} currently checked document${selectedDocumentIds.size === 1 ? "" : "s"} — as a zip (Export documents) or a metadata CSV (Export properties).`}
@@ -339,10 +339,10 @@ export function FilterPanel({
       </div>
 
       <div className="mb-6">
-        <h2 className="m-0 mb-2.5 text-[10.5px] font-semibold tracking-[0.08em] text-ink-soft uppercase">Access</h2>
-        {accessError && <p className="mt-1.5 text-[11.5px] text-seal">{accessError}</p>}
+        <h2 className="m-0 mb-2.5 text-xs font-semibold tracking-[0.08em] text-ink-soft uppercase">Access</h2>
+        {accessError && <p className="mt-1.5 text-xs text-seal">{accessError}</p>}
         {!members ? (
-          <p className="px-0.5 py-1 text-[11.5px] italic text-ink-soft">Loading…</p>
+          <p className="px-0.5 py-1 text-xs italic text-ink-soft">Loading…</p>
         ) : (
           <table className="w-full border-collapse text-xs [&_tr:not(:last-child)]:border-b [&_tr:not(:last-child)]:border-line">
             <tbody>

@@ -252,7 +252,7 @@ function EddWorkbenchWorkspaceInner({ apiBaseUrl = "http://localhost:4430/api", 
       <div className="flex h-full flex-col">
         <header className="relative flex flex-[0_0_auto] items-center gap-5 border-b-[3px] border-seal bg-navy px-5 py-3 text-white">
           <div className="flex items-baseline gap-2">
-            <span className="flex h-[22px] w-[22px] flex-none items-center justify-center rounded-[3px] border-[1.5px] border-white font-mono text-[11px] font-semibold">Co</span>
+            <span className="flex h-[22px] w-[22px] flex-none items-center justify-center rounded-[3px] border-[1.5px] border-white font-mono text-xs font-semibold">Co</span>
           </div>
           <Button ghost size="small" className="ml-auto" onClick={() => setShowNotices(true)}>
             Notices
@@ -263,10 +263,10 @@ function EddWorkbenchWorkspaceInner({ apiBaseUrl = "http://localhost:4430/api", 
             </Button>
           )}
         </header>
-        <p className="px-0.5 py-1 text-[11.5px] italic text-ink-soft" style={{ padding: 24 }}>
+        <p className="px-0.5 py-1 text-xs italic text-ink-soft" style={{ padding: 24 }}>
           You don't have access to any matters yet. Ask an admin to add you to one.
         </p>
-        {error && <p className="mt-1.5 text-[11.5px] text-seal">{error}</p>}
+        {error && <p className="mt-1.5 text-xs text-seal">{error}</p>}
         {showNotices && <NoticeDialog onClose={() => setShowNotices(false)} />}
       </div>
     );
@@ -280,7 +280,7 @@ function EddWorkbenchWorkspaceInner({ apiBaseUrl = "http://localhost:4430/api", 
       <div className="flex h-full flex-col">
         <header className="relative flex flex-[0_0_auto] items-center gap-5 border-b-[3px] border-seal bg-navy px-5 py-3 text-white">
           <div className="flex items-baseline gap-2">
-            <span className="flex h-[22px] w-[22px] flex-none items-center justify-center rounded-[3px] border-[1.5px] border-white font-mono text-[11px] font-semibold">Co</span>
+            <span className="flex h-[22px] w-[22px] flex-none items-center justify-center rounded-[3px] border-[1.5px] border-white font-mono text-xs font-semibold">Co</span>
           </div>
           <Button ghost size="small" className="ml-auto" onClick={() => setShowNotices(true)}>
             Notices
@@ -291,8 +291,8 @@ function EddWorkbenchWorkspaceInner({ apiBaseUrl = "http://localhost:4430/api", 
             </Button>
           )}
         </header>
-        <p className="px-0.5 py-1 text-[11.5px] italic text-ink-soft">Loading…</p>
-        {error && <p className="mt-1.5 text-[11.5px] text-seal">{error}</p>}
+        <p className="px-0.5 py-1 text-xs italic text-ink-soft">Loading…</p>
+        {error && <p className="mt-1.5 text-xs text-seal">{error}</p>}
         {showNotices && <NoticeDialog onClose={() => setShowNotices(false)} />}
       </div>
     );
@@ -370,7 +370,7 @@ function EddWorkbenchWorkspaceInner({ apiBaseUrl = "http://localhost:4430/api", 
           </Button>
         )}
       </header>
-      {error && <p className="mt-1.5 text-[11.5px] text-seal">{error}</p>}
+      {error && <p className="mt-1.5 text-xs text-seal">{error}</p>}
       {showNotices && <NoticeDialog onClose={() => setShowNotices(false)} />}
       <main className="flex min-h-0 flex-1">
         <MatterDetail

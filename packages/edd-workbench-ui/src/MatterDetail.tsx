@@ -621,7 +621,7 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
                   {/* `danger` replaces the inline --seal border/colour: antd
                       derives it from colorError, which antdTheme.ts maps to
                       that same token. */}
-                  <Button danger size="small" onClick={() => setShowBulkDeleteConfirm(true)}>
+                  <Button danger type="primary" size="small" onClick={() => setShowBulkDeleteConfirm(true)}>
                     Delete {checkedDocumentIds.size}
                   </Button>
                 </span>

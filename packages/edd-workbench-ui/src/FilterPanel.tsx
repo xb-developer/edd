@@ -400,7 +400,7 @@ export function FilterPanel({
                 ) : (
                   <tr>
                     <td colSpan={2}>
-                      <Button type="dashed" size="small" block aria-label="Add a user to this matter's access list" onClick={openAddRow}>
+                      <Button size="small" block aria-label="Add a user to this matter's access list" onClick={openAddRow}>
                         +
                       </Button>
                     </td>

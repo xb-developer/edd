@@ -33,7 +33,6 @@ function buildTestApp(eddContext: EddRequestContext) {
 
 async function cleanupTestOrg(orgId: string): Promise<void> {
   await withOrgSession(orgId, async (client) => {
-    await client.query("DELETE FROM audit_log WHERE org_id = $1", [orgId]);
     await client.query("DELETE FROM matters WHERE org_id = $1", [orgId]);
   });
 }

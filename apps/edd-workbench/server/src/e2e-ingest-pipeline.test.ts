@@ -104,8 +104,7 @@ describe("full ingest pipeline (end-to-end)", () => {
 
   afterAll(async () => {
     await withOrgSession(orgId, async (client) => {
-      await client.query("DELETE FROM audit_log WHERE org_id = $1", [orgId]);
-      await client.query("DELETE FROM matters WHERE org_id = $1", [orgId]);
+        await client.query("DELETE FROM matters WHERE org_id = $1", [orgId]);
     });
     // Best-effort — this is real Elasticsearch, not a per-test-isolated
     // substitute, so leftover test docs shouldn't linger in a long-running

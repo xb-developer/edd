@@ -23,10 +23,11 @@ describe("recordAuditEvent", () => {
   });
 
   afterAll(async () => {
-    await withOrgSession(orgId, async (client) => {
-      await client.query("DELETE FROM audit_log WHERE org_id = $1", [orgId]);
-      await client.query("DELETE FROM matters WHERE org_id = $1", [orgId]);
-    });
+    // audit_log itself is deliberately NOT deleted here — the app role has
+    // no DELETE grant on it (append-only, see migration 023's own "no
+    // UPDATE/DELETE grant at all"); each test run uses a fresh random
+    // orgId, so leftover rows never affect another run's assertions.
+    await withOrgSession(orgId, (client) => client.query("DELETE FROM matters WHERE org_id = $1", [orgId]));
     await pool.end();
   });
 
@@ -92,16 +93,12 @@ describe("recordAuditEvent", () => {
 
   it("never returns another organization's audit rows", async () => {
     const otherOrgId = `org_test_${randomUUID()}`;
-    try {
-      await withOrgSession(otherOrgId, async (client) => {
-        const otherUserId = `auth0|${randomUUID()}`;
-        await recordAuditEvent(client, { orgId: otherOrgId, actorUserId: otherUserId, action: "logout", description: "Other org logout" });
-      });
+    await withOrgSession(otherOrgId, async (client) => {
+      const otherUserId = `auth0|${randomUUID()}`;
+      await recordAuditEvent(client, { orgId: otherOrgId, actorUserId: otherUserId, action: "logout", description: "Other org logout" });
+    });
 
-      const rows = await withOrgSession(orgId, (client) => client.query("SELECT 1 FROM audit_log WHERE description = 'Other org logout'"));
-      expect(rows.rowCount).toBe(0);
-    } finally {
-      await withOrgSession(otherOrgId, (client) => client.query("DELETE FROM audit_log WHERE org_id = $1", [otherOrgId]));
-    }
+    const rows = await withOrgSession(orgId, (client) => client.query("SELECT 1 FROM audit_log WHERE description = 'Other org logout'"));
+    expect(rows.rowCount).toBe(0);
   });
 });

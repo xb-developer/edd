@@ -1,6 +1,5 @@
 import { Router, type Request } from "express";
-import { DeleteObjectCommand } from "@aws-sdk/client-s3";
-import { withOrgSession, initMatterGuidCounter, recordAuditEvent, s3Client, DOCUMENTS_BUCKET, deleteDocumentFromIndex } from "@xbundle/edd-workbench-core";
+import { withOrgSession, initMatterGuidCounter, recordAuditEvent, deleteS3ObjectsBestEffort, deleteMatterFromIndex } from "@xbundle/edd-workbench-core";
 import { requireRole, requireMatterAccess } from "../auth.js";
 
 export const mattersRouter = Router();
@@ -213,20 +212,17 @@ mattersRouter.delete("/:matterId", requireRole("admin"), async (req: Request<{ m
     // Best-effort, same as deleteDocumentsWithS3Cleanup — the DB rows
     // (already gone via cascade) are what the rest of the app treats as
     // "does this exist"; S3/search-index staleness is logged, not thrown.
-    await Promise.all(
-      documents.map((doc) =>
-        s3Client.send(new DeleteObjectCommand({ Bucket: DOCUMENTS_BUCKET, Key: doc.s3_key })).catch((err) => {
-          console.error(`Failed to delete S3 object ${doc.s3_key} during deletion of matter ${matterId}:`, err);
-        }),
-      ),
+    await deleteS3ObjectsBestEffort(
+      documents.map((doc) => doc.s3_key),
+      `deletion of matter ${matterId}`,
     );
-    await Promise.all(
-      documents.map((doc) =>
-        deleteDocumentFromIndex(doc.id).catch((err) => {
-          console.error(`Failed to remove search index entry for document ${doc.id} during deletion of matter ${matterId}:`, err);
-        }),
-      ),
-    );
+    // One _delete_by_query for the whole matter, rather than a request per
+    // document — the ids were only ever needed for their S3 keys.
+    try {
+      await deleteMatterFromIndex(orgId, matterId);
+    } catch (err) {
+      console.error(`Failed to remove search index entries during deletion of matter ${matterId}:`, err);
+    }
 
     res.status(204).send();
   } catch (err) {

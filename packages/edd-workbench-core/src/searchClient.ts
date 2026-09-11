@@ -56,6 +56,70 @@ export async function deleteDocumentFromIndex(documentId: string): Promise<void>
   }
 }
 
+// Elasticsearch's own default http.max_content_length is 100mb; at roughly
+// 80 bytes per delete action line this could be far larger, but a bounded
+// chunk keeps one failed request from losing an unbounded amount of work
+// and keeps the request body predictable.
+const BULK_DELETE_CHUNK = 5000;
+
+/**
+ * Batched form of deleteDocumentFromIndex, same best-effort semantics (a
+ * 404 per item is not an error).
+ *
+ * The delete paths fan out over every cascade-deleted descendant, and
+ * `Promise.all(rows.map(deleteDocumentFromIndex))` issued one HTTP request
+ * per document with no concurrency bound at all — deleting a
+ * 50,000-document matter opened 50,000 simultaneous sockets from a single
+ * Node process, which is a file-descriptor exhaustion failure, not merely
+ * a slow one.
+ */
+export async function deleteDocumentsFromIndex(documentIds: readonly string[]): Promise<void> {
+  for (let i = 0; i < documentIds.length; i += BULK_DELETE_CHUNK) {
+    const chunk = documentIds.slice(i, i + BULK_DELETE_CHUNK);
+    // NDJSON, and the trailing newline is required — Elasticsearch rejects
+    // a _bulk body whose final line isn't newline-terminated.
+    const body = chunk.map((id) => JSON.stringify({ delete: { _index: INDEX_NAME, _id: id } })).join("\n") + "\n";
+    const res = await fetch(`${serviceUrl()}/_bulk`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-ndjson" },
+      body,
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`Search index bulk delete failed: ${res.status} ${text}`);
+    }
+    // A 200 from _bulk does NOT mean every item succeeded — per-item
+    // failures are reported inside the body. "not_found" is expected and
+    // fine (never indexed, or already gone); anything else is real.
+    const result = (await res.json()) as { errors?: boolean; items?: { delete?: { status: number; error?: unknown } }[] };
+    if (result.errors) {
+      const failed = (result.items ?? []).filter((item) => item.delete && item.delete.status !== 404 && item.delete.error);
+      if (failed.length > 0) {
+        throw new Error(`Search index bulk delete reported ${failed.length} failed item(s): ${JSON.stringify(failed[0].delete?.error)}`);
+      }
+    }
+  }
+}
+
+/**
+ * Removes every entry for one matter in a single request, without first
+ * enumerating its document ids — the whole-matter delete knows the matter,
+ * so there's no reason to round-trip once per document (or even once per
+ * 5,000). org_id is filtered too, for the same defense-in-depth reason
+ * searchDocuments filters both (Elasticsearch has no RLS equivalent).
+ */
+export async function deleteMatterFromIndex(orgId: string, matterId: string): Promise<void> {
+  const res = await fetch(`${serviceUrl()}/${INDEX_NAME}/_delete_by_query?conflicts=proceed`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query: { bool: { filter: [{ term: { org_id: orgId } }, { term: { matter_id: matterId } }] } } }),
+  });
+  if (!res.ok && res.status !== 404) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Search index matter delete failed: ${res.status} ${text}`);
+  }
+}
+
 export interface SearchResult {
   documentIds: string[];
   totalHits: number;

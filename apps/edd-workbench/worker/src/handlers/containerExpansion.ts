@@ -411,6 +411,16 @@ export const PST_MAX_SIZE_BYTES = 80 * 1024 ** 3;
 // ceiling.
 export const ZIP_MAX_SIZE_BYTES = 2 * 1024 ** 3;
 
+// The uncompressed half of the zip ceiling, mirroring the
+// compressed/uncompressed split 7z has had from the start. ZIP_MAX_SIZE_BYTES
+// alone caps only what's downloaded: a 2 GiB archive at a routine 10:1 text
+// ratio is ~20 GiB of contents, and at a malicious ratio, far more. Members
+// are now streamed one at a time (see extractZipMembers), so this doesn't
+// have to cover a simultaneous-residency worst case the way a buffered
+// implementation would — it's the bomb guard, sized generously against the
+// worker's real memory rather than tightly against any one archive.
+export const ZIP_MAX_UNCOMPRESSED_BYTES = 20 * 1024 ** 3;
+
 // A 7z archive is disk-streamed like PST, not memory-buffered like zip —
 // 7z's much higher compression ratios make an in-memory approach a real
 // bomb risk at a much smaller input size than a zip's. The ingest queue's
@@ -462,14 +472,22 @@ export async function handleZipIngest(params: ContainerIngestParams): Promise<vo
   try {
     const object = await s3Client.send(new GetObjectCommand({ Bucket: DOCUMENTS_BUCKET, Key: s3Key }));
     const buffer = await streamToBuffer(object.Body as Readable);
-    const rawMembers = await extractZipMembers(buffer);
-    const members: ContainerMember[] = rawMembers.map((m) => ({
-      filename: m.filename,
-      content: m.content,
-      metadata: { source: "zip", zipPath: m.zipPath },
-    }));
+    // Mapped lazily, member by member — materializing this into an array
+    // first would reintroduce exactly the "every decompressed member live
+    // at once" problem extractZipMembers was made a generator to avoid.
+    async function* members(): AsyncGenerator<ContainerMember> {
+      for await (const m of extractZipMembers(buffer, ZIP_MAX_UNCOMPRESSED_BYTES)) {
+        yield { filename: m.filename, content: m.content, metadata: { source: "zip", zipPath: m.zipPath } };
+      }
+    }
 
-    const result = await expandTransparentContainerMembers({ orgId, matterId, container: { parentDocumentId, familyDocumentId, depth }, members, uploadBatchId });
+    const result = await expandTransparentContainerMembers({
+      orgId,
+      matterId,
+      container: { parentDocumentId, familyDocumentId, depth },
+      members: members(),
+      uploadBatchId,
+    });
     await finalizeTransparentContainer({ orgId, documentId, s3Key, result });
   } catch (err) {
     // The zip itself couldn't be opened at all (missing S3 object,

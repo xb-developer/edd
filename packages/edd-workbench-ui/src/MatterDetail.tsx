@@ -43,27 +43,58 @@ function useDragResize(initial: number, min: number, max: number, axis: "x" | "y
   const [size, setSize] = useState(initial);
   const [dragging, setDragging] = useState(false);
   const startRef = useRef({ pos: 0, size: initial });
+  // The live size between pointerdown and pointerup. `size` state is
+  // deliberately NOT updated during the drag (see onPointerMove), so this
+  // ref — not the state — is the source of truth for that window.
+  const liveSizeRef = useRef(initial);
+  // The element actually being resized, so a move can write to it directly.
+  const targetRef = useRef<HTMLElement | null>(null);
 
   function onPointerDown(e: ReactPointerEvent<HTMLDivElement>) {
     e.currentTarget.setPointerCapture(e.pointerId);
-    startRef.current = { pos: axis === "x" ? e.clientX : e.clientY, size };
+    startRef.current = { pos: axis === "x" ? e.clientX : e.clientY, size: liveSizeRef.current };
     setDragging(true);
   }
   function onPointerMove(e: ReactPointerEvent<HTMLDivElement>) {
     if (!dragging) return;
     const pos = axis === "x" ? e.clientX : e.clientY;
     const delta = (pos - startRef.current.pos) * direction;
-    setSize(Math.min(max, Math.max(min, startRef.current.size + delta)));
+    const next = Math.min(max, Math.max(min, startRef.current.size + delta));
+    liveSizeRef.current = next;
+    // Written straight to the element's style instead of through setState.
+    // pointermove fires at the pointer's own rate (60-120Hz), and every
+    // setState here re-rendered the whole of MatterDetail — including the
+    // full sortedDocuments.map() and every one of its ~13 cells per row —
+    // for what is only ever a single CSS length change. The useMemos around
+    // the document lists don't help: the memo returns the same array, but
+    // the .map() over it still re-runs and React still reconciles every
+    // row. This keeps a drag O(1) regardless of how many documents are
+    // loaded.
+    if (targetRef.current) targetRef.current.style.flexBasis = `${next}px`;
   }
   function endDrag(e: ReactPointerEvent<HTMLDivElement>) {
     setDragging(false);
+    // The one render of the whole drag — reconciling the value already
+    // written to the DOM above, so there's nothing to flash.
+    setSize(liveSizeRef.current);
     // A drag that never moved (a plain click) never actually captured the
     // pointer in some browsers' interpretation — releasing an uncaptured
     // pointer id throws, hence the guard.
     if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
   }
 
-  return { size, dragging, onPointerDown, onPointerMove, onPointerUp: endDrag, onPointerCancel: endDrag };
+  return {
+    // During a drag, report the live ref rather than the (deliberately
+    // stale) state — an unrelated re-render mid-drag would otherwise paint
+    // the pre-drag size back over what was just written to the DOM.
+    size: dragging ? liveSizeRef.current : size,
+    dragging,
+    targetRef,
+    // Kept as a nested object rather than spread from the hook's own return
+    // value: the call sites spread these onto the handle <div>, and `size`/
+    // `dragging`/`targetRef` are not valid DOM attributes.
+    handleProps: { onPointerDown, onPointerMove, onPointerUp: endDrag, onPointerCancel: endDrag },
+  };
 }
 
 type DocumentColumnKey =
@@ -128,6 +159,22 @@ function useColumnWidths(matterId: string) {
   const dragRef = useRef({ column: null as DocumentColumnKey | null, startX: 0, startWidth: 0 });
   const manuallyResizedRef = useRef(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  // Live widths during a drag — same reasoning as useDragResize's
+  // liveSizeRef: `widths` state is not updated between pointerdown and
+  // pointerup, so this is the source of truth for that window.
+  const liveWidthsRef = useRef<Record<DocumentColumnKey, number>>(DEFAULT_COLUMN_WIDTHS);
+  // The <col> element per column, plus the <table> itself (whose own width
+  // is the sum of the columns) — written to directly during a drag.
+  const colRefs = useRef<Partial<Record<DocumentColumnKey, HTMLTableColElement | null>>>({});
+  const tableRef = useRef<HTMLTableElement | null>(null);
+
+  // Every path that sets widths through state must keep the live ref in
+  // step, or the next drag starts from a stale baseline (auto-fit on matter
+  // change and on panel resize both land here).
+  const applyWidths = useCallback((next: Record<DocumentColumnKey, number>) => {
+    liveWidthsRef.current = next;
+    setWidths(next);
+  }, []);
 
   const fitToContainer = useCallback(() => {
     if (manuallyResizedRef.current) return;
@@ -137,8 +184,8 @@ function useColumnWidths(matterId: string) {
     // -2px slack against border/rounding so fitting exactly never itself
     // triggers a 1px scrollbar sliver.
     const available = container.clientWidth - SELECT_CELL_WIDTH - CHECK_CELL_WIDTH - preferredTotal - 2;
-    setWidths({ ...PREFERRED_COLUMN_WIDTHS, originalFilename: Math.max(MIN_COLUMN_WIDTH, available) });
-  }, []);
+    applyWidths({ ...PREFERRED_COLUMN_WIDTHS, originalFilename: Math.max(MIN_COLUMN_WIDTH, available) });
+  }, [applyWidths]);
 
   // Layout effect, not a plain effect — this measures and sets widths that
   // affect visible layout immediately; running before the browser's first
@@ -163,7 +210,7 @@ function useColumnWidths(matterId: string) {
       e.stopPropagation();
       e.currentTarget.setPointerCapture(e.pointerId);
       manuallyResizedRef.current = true;
-      dragRef.current = { column, startX: e.clientX, startWidth: widths[column] };
+      dragRef.current = { column, startX: e.clientX, startWidth: liveWidthsRef.current[column] };
       setDraggingColumn(column);
     };
   }
@@ -171,15 +218,36 @@ function useColumnWidths(matterId: string) {
     const drag = dragRef.current;
     if (!drag.column) return;
     const next = Math.max(MIN_COLUMN_WIDTH, drag.startWidth + (e.clientX - drag.startX));
-    setWidths((prev) => ({ ...prev, [drag.column!]: next }));
+    liveWidthsRef.current = { ...liveWidthsRef.current, [drag.column]: next };
+    // Straight to the DOM, not through setState — see useDragResize's
+    // onPointerMove for why (this one is worse: dragging a column edge
+    // re-rendered every row of the table on every pointermove).
+    const col = colRefs.current[drag.column];
+    if (col) col.style.width = `${next}px`;
+    if (tableRef.current) {
+      const total = Object.values(liveWidthsRef.current).reduce((sum, w) => sum + w, 0);
+      tableRef.current.style.width = `${SELECT_CELL_WIDTH + CHECK_CELL_WIDTH + total}px`;
+    }
   }
   function endResize(e: ReactPointerEvent<HTMLDivElement>) {
     dragRef.current.column = null;
     setDraggingColumn(null);
+    // The one render of the whole drag.
+    setWidths(liveWidthsRef.current);
     if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
   }
 
-  return { widths, draggingColumn, startResize, onMove, endResize, containerRef };
+  return {
+    // Same live-ref-during-drag rule as useDragResize.
+    widths: draggingColumn ? liveWidthsRef.current : widths,
+    draggingColumn,
+    startResize,
+    onMove,
+    endResize,
+    containerRef,
+    colRefs,
+    tableRef,
+  };
 }
 
 interface ColumnResizeHandleProps {
@@ -711,6 +779,7 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
             currentUserId={currentUserId}
             matterCreatedBy={matterCreatedBy}
             style={{ flexBasis: leftResize.size }}
+            rootRef={leftResize.targetRef}
             tagSets={tagSets}
             appliedTagsByDocument={appliedTagsByDocument}
             searchQuery={searchQuery}
@@ -731,7 +800,7 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
             onAskResult={handleAskResult}
           />
 
-          <div className={`col-resize-handle${leftResize.dragging ? " dragging" : ""}`} {...leftResize} />
+          <div className={`col-resize-handle${leftResize.dragging ? " dragging" : ""}`} {...leftResize.handleProps} />
 
           <section className="col col-center">
             <div className="table-toolbar">
@@ -800,6 +869,7 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
                 // either, if this computed value ever comes in a hair short.
                 <table
                   className="reg"
+                  ref={columnWidths.tableRef}
                   style={{
                     width:
                       SELECT_CELL_WIDTH +
@@ -809,17 +879,17 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
                 >
                   <colgroup>
                     <col style={{ width: SELECT_CELL_WIDTH }} />
-                    <col style={{ width: columnWidths.widths.guid }} />
-                    <col style={{ width: columnWidths.widths.familyGuid }} />
-                    <col style={{ width: columnWidths.widths.originalFilename }} />
-                    <col style={{ width: columnWidths.widths.extension }} />
-                    <col style={{ width: columnWidths.widths.sizeBytes }} />
-                    <col style={{ width: columnWidths.widths.docDate }} />
-                    <col style={{ width: columnWidths.widths.author }} />
-                    <col style={{ width: columnWidths.widths.contentModifiedAt }} />
-                    <col style={{ width: columnWidths.widths.toAddresses }} />
-                    <col style={{ width: columnWidths.widths.ccAddresses }} />
-                    <col style={{ width: columnWidths.widths.tags }} />
+                    <col style={{ width: columnWidths.widths.guid }} ref={(el) => { columnWidths.colRefs.current.guid = el; }} />
+                    <col style={{ width: columnWidths.widths.familyGuid }} ref={(el) => { columnWidths.colRefs.current.familyGuid = el; }} />
+                    <col style={{ width: columnWidths.widths.originalFilename }} ref={(el) => { columnWidths.colRefs.current.originalFilename = el; }} />
+                    <col style={{ width: columnWidths.widths.extension }} ref={(el) => { columnWidths.colRefs.current.extension = el; }} />
+                    <col style={{ width: columnWidths.widths.sizeBytes }} ref={(el) => { columnWidths.colRefs.current.sizeBytes = el; }} />
+                    <col style={{ width: columnWidths.widths.docDate }} ref={(el) => { columnWidths.colRefs.current.docDate = el; }} />
+                    <col style={{ width: columnWidths.widths.author }} ref={(el) => { columnWidths.colRefs.current.author = el; }} />
+                    <col style={{ width: columnWidths.widths.contentModifiedAt }} ref={(el) => { columnWidths.colRefs.current.contentModifiedAt = el; }} />
+                    <col style={{ width: columnWidths.widths.toAddresses }} ref={(el) => { columnWidths.colRefs.current.toAddresses = el; }} />
+                    <col style={{ width: columnWidths.widths.ccAddresses }} ref={(el) => { columnWidths.colRefs.current.ccAddresses = el; }} />
+                    <col style={{ width: columnWidths.widths.tags }} ref={(el) => { columnWidths.colRefs.current.tags = el; }} />
                     <col style={{ width: CHECK_CELL_WIDTH }} />
                   </colgroup>
                   <thead>
@@ -1064,9 +1134,9 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
             </div>
           </section>
 
-          <div className={`col-resize-handle${rightResize.dragging ? " dragging" : ""}`} {...rightResize} />
+          <div className={`col-resize-handle${rightResize.dragging ? " dragging" : ""}`} {...rightResize.handleProps} />
 
-          <section className="col col-right" style={{ flexBasis: rightResize.size }}>
+          <section className="col col-right" style={{ flexBasis: rightResize.size }} ref={rightResize.targetRef as React.RefObject<HTMLElement>}>
             {selectedDocument && (
               <div className="pane-title-row">
                 <h2 className="panel-title">Preview</h2>
@@ -1086,7 +1156,7 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
               </div>
             )}
             {viewerWindow.popOutError && <p className="preview-unsupported">{viewerWindow.popOutError}</p>}
-            <div className="panel-body" style={{ flexBasis: rowResize.size, flexGrow: 0, flexShrink: 0 }}>
+            <div className="panel-body" style={{ flexBasis: rowResize.size, flexGrow: 0, flexShrink: 0 }} ref={rowResize.targetRef as React.RefObject<HTMLDivElement>}>
               {!selectedDocument ? (
                 <p className="no-selection">Select a document to preview it.</p>
               ) : viewerWindow.state === "open" ? (
@@ -1117,7 +1187,7 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
               )}
             {selectedDocument && (
               <>
-                <div className={`row-resize-handle${rowResize.dragging ? " dragging" : ""}`} {...rowResize} />
+                <div className={`row-resize-handle${rowResize.dragging ? " dragging" : ""}`} {...rowResize.handleProps} />
                 <CodingPanel
                   api={api}
                   matterId={matterId}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, RefObject } from "react";
 import type { ApiClient } from "./api";
 import type { TagSetDTO, MatterMemberDTO, MatterMemberCandidateDTO, DocumentDTO, AskResultDTO } from "./types";
 import { ExportButtons } from "./ExportButtons";
@@ -30,6 +30,8 @@ export interface FilterPanelProps {
   /** This matter's `created_by`, so the access list can block the creator from removing their own row (see matterMembers.ts's own DELETE /:userId guard — this is the UI-side mirror of that check, not a replacement for it). */
   matterCreatedBy: string | null;
   style?: CSSProperties;
+  /** The panel's own root element, so MatterDetail's drag-resize can write flexBasis straight to it during a drag instead of re-rendering (see useDragResize). */
+  rootRef?: RefObject<HTMLElement | null>;
   tagSets: TagSetDTO[];
   appliedTagsByDocument: Record<string, string[]>;
   searchQuery: string;
@@ -44,8 +46,15 @@ export interface FilterPanelProps {
   matchMode: "all" | "any";
   onMatchModeChange: (mode: "all" | "any") => void;
   onClearTagFilter: () => void;
-  /** The bulk-select checkbox column's checked ids (MatterDetail's `checkedDocumentIds`) — both exports are scoped to exactly this set, never "everything in the matter." */
-  /** The checked set itself, NOT a copy — passing `Array.from(...)` here made every consumer below O(selected) per render, and the `.includes` on line ~118 O(documents × selected). It's already a Set upstream (MatterDetail's checkedDocumentIds); keep it one. */
+  /**
+   * The bulk-select checkbox column's checked ids (MatterDetail's
+   * `checkedDocumentIds`) — both exports are scoped to exactly this set,
+   * never "everything in the matter."
+   *
+   * The Set itself, NOT a copy: passing `Array.from(...)` made every
+   * consumer below O(checked) per render, and failedSelectedDocumentIds'
+   * `.includes` O(documents × checked).
+   */
   selectedDocumentIds: ReadonlySet<string>;
   /** The matter's full, unfiltered document list — needed here (not just the already-filtered rows the table shows) so status counts reflect the whole matter, same as tag counts already do via appliedTagsByDocument. */
   documents: DocumentDTO[];
@@ -74,6 +83,7 @@ export function FilterPanel({
   currentUserId,
   matterCreatedBy,
   style,
+  rootRef,
   tagSets,
   appliedTagsByDocument,
   searchQuery,
@@ -211,7 +221,7 @@ export function FilterPanel({
   }
 
   return (
-    <section className="col col-left" style={style}>
+    <section className="col col-left" style={style} ref={rootRef as RefObject<HTMLElement> | undefined}>
       <div className="section">
         <h2 className="panel-title">Search</h2>
         <input

@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { Router, type Request } from "express";
-import { GetObjectCommand, PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { SendMessageCommand } from "@aws-sdk/client-sqs";
 import {
   withOrgSession,
-  nextMatterGuid,
+  reserveMatterGuidBlock,
   formatGuid,
   s3Client,
   sqsClient,
@@ -13,7 +13,9 @@ import {
   detectContentType,
   MATTER_DOCUMENT_TREE_CTE,
   recordAuditEvent,
-  deleteDocumentFromIndex,
+  recordAuditEvents,
+  deleteDocumentsFromIndex,
+  deleteS3ObjectsBestEffort,
   MATTER_STORAGE_QUOTA_BYTES,
   getMatterStorageUsedBytes,
   matterQuotaExceededMessage,
@@ -260,37 +262,36 @@ async function deleteDocumentsWithS3Cleanup(orgId: string, actorUserId: string, 
     // One row per document actually removed — including every
     // cascade-deleted descendant (e.g. an email's own attachments, and
     // their own attachments in turn), not just the ids the caller
-    // explicitly requested, since those rows disappear too.
-    for (const row of rows.rows) {
-      await recordAuditEvent(client, {
+    // explicitly requested, since those rows disappear too. Written as one
+    // statement rather than an awaited loop: a 50,000-document matter would
+    // otherwise be 50,000 sequential round-trips with this transaction (and
+    // its locks) held open throughout.
+    await recordAuditEvents(
+      client,
+      rows.rows.map((row) => ({
         orgId,
         actorUserId,
         matterId,
-        action: "document.delete",
+        action: "document.delete" as const,
         description: `Deleted file "${row.original_filename}"`,
-      });
-    }
+      })),
+    );
     return rows.rows;
   });
 
-  await Promise.all(
-    deletedRows.map((row) =>
-      s3Client.send(new DeleteObjectCommand({ Bucket: DOCUMENTS_BUCKET, Key: row.s3_key })).catch((err) => {
-        console.error(`Failed to delete S3 object ${row.s3_key} during a delete of matter ${matterId}'s documents:`, err);
-      }),
-    ),
+  await deleteS3ObjectsBestEffort(
+    deletedRows.map((row) => row.s3_key),
+    `a delete of matter ${matterId}'s documents`,
   );
   // Same best-effort treatment as the S3 cleanup above — this is an
   // eDiscovery tool, so "the search index still has a stale entry" is a
   // real gap (privilege clawback/inadvertent-production deletes need the
   // extracted text actually gone), not just a UI cosmetic issue.
-  await Promise.all(
-    deletedRows.map((row) =>
-      deleteDocumentFromIndex(row.id).catch((err) => {
-        console.error(`Failed to remove search index entry for document ${row.id} during a delete of matter ${matterId}'s documents:`, err);
-      }),
-    ),
-  );
+  try {
+    await deleteDocumentsFromIndex(deletedRows.map((row) => row.id));
+  } catch (err) {
+    console.error(`Failed to remove search index entries during a delete of matter ${matterId}'s documents:`, err);
+  }
 
   return deletedRows.length;
 }
@@ -438,47 +439,85 @@ documentsRouter.post("/init-upload", async (req: Request<{ matterId: string }>, 
       // against an empty matter must reject the second, not let both
       // through because neither alone exceeds the quota on its own).
       let usedBytes = await getMatterStorageUsedBytes(client, matterId);
-      const created: InitUploadResult[] = [];
-      for (const file of files) {
+
+      // Results are positional: every file gets an entry at its own index,
+      // either a quota rejection or (filled in below) a real document.
+      const created: InitUploadResult[] = new Array(files.length);
+      const admitted: { index: number; file: InitUploadFile; documentId: string; extension: string; s3Key: string }[] = [];
+
+      for (const [index, file] of files.entries()) {
         if (usedBytes + file.size > MATTER_STORAGE_QUOTA_BYTES) {
-          created.push({ error: matterQuotaExceededMessage(file.filename) });
+          created[index] = { error: matterQuotaExceededMessage(file.filename) };
           continue;
         }
         usedBytes += file.size;
-
-        const guidNumber = await nextMatterGuid(client, matterId);
         const documentId = randomUUID();
         const extension = file.filename.toLowerCase().split(".").pop() ?? "";
-        const contentTypeDetected = detectContentType(file.filename);
-        const s3Key = `tenants/${orgId}/matters/${matterId}/documents/${documentId}/original.${extension}`;
+        admitted.push({
+          index,
+          file,
+          documentId,
+          extension,
+          s3Key: `tenants/${orgId}/matters/${matterId}/documents/${documentId}/original.${extension}`,
+        });
+      }
 
+      if (admitted.length > 0) {
+        // Two round-trips for the whole batch (reserve the GUID block, then
+        // one multi-row INSERT) rather than two PER FILE. The per-file form
+        // held the matter's GUID-counter row lock across every one of them,
+        // so a 1,000-file batch serialized ~2,000 round-trips against a
+        // lock every concurrent upload to the matter had to queue behind.
+        const firstGuid = await reserveMatterGuidBlock(client, matterId, admitted.length);
+        admitted.forEach((entry, offset) => {
+          created[entry.index] = { documentId: entry.documentId, guid: formatGuid(firstGuid + offset), uploadUrl: "" };
+        });
+
+        // family_document_id is each row's OWN id (a freshly uploaded
+        // top-level document is its own family root) — expressed as
+        // u.document_id twice rather than the `$1` self-reference the
+        // single-row INSERT used.
         await client.query(
           `INSERT INTO documents (id, org_id, matter_id, guid_number, original_filename, extension, size_bytes, file_modified_at, s3_key, content_type_detected, ingest_status, uploaded_by, family_document_id, depth, upload_batch_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', $11, $1, 0, $12)`,
+           SELECT u.document_id, $1, $2, u.guid_number, u.original_filename, u.extension, u.size_bytes, u.file_modified_at, u.s3_key,
+                  -- Explicit cast: content_type_detected/ingest_status are
+                  -- real Postgres enums. The single-row VALUES form let the
+                  -- planner infer each parameter's type from its target
+                  -- column; unnest() types the expression as text first, so
+                  -- the cast has to be stated.
+                  u.content_type_detected::document_content_type, 'pending'::document_ingest_status, $3, u.document_id, 0, $4
+           FROM unnest($5::uuid[], $6::int[], $7::text[], $8::text[], $9::bigint[], $10::timestamptz[], $11::text[], $12::text[])
+                AS u(document_id, guid_number, original_filename, extension, size_bytes, file_modified_at, s3_key, content_type_detected)`,
           [
-            documentId,
             orgId,
             matterId,
-            guidNumber,
-            file.filename,
-            extension,
-            file.size,
-            file.lastModified ? new Date(file.lastModified) : null,
-            s3Key,
-            contentTypeDetected,
             userId,
             uploadBatchId,
+            admitted.map((e) => e.documentId),
+            admitted.map((_, offset) => firstGuid + offset),
+            admitted.map((e) => e.file.filename),
+            admitted.map((e) => e.extension),
+            admitted.map((e) => e.file.size),
+            admitted.map((e) => (e.file.lastModified ? new Date(e.file.lastModified) : null)),
+            admitted.map((e) => e.s3Key),
+            admitted.map((e) => detectContentType(e.file.filename)),
           ],
         );
 
-        const uploadUrl = await getSignedUrl(
-          s3Client,
-          new PutObjectCommand({ Bucket: DOCUMENTS_BUCKET, Key: s3Key, ContentType: file.contentType }),
-          { expiresIn: 900 },
+        // Presigning is local HMAC — no network call — so this stays
+        // per-file without costing a round-trip each.
+        await Promise.all(
+          admitted.map(async (entry) => {
+            const uploadUrl = await getSignedUrl(
+              s3Client,
+              new PutObjectCommand({ Bucket: DOCUMENTS_BUCKET, Key: entry.s3Key, ContentType: entry.file.contentType }),
+              { expiresIn: 900 },
+            );
+            (created[entry.index] as { uploadUrl: string }).uploadUrl = uploadUrl;
+          }),
         );
-
-        created.push({ documentId, guid: formatGuid(guidNumber), uploadUrl });
       }
+
       return created;
     });
 

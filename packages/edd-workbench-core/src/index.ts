@@ -1,9 +1,9 @@
 export { pool } from "./pool.js";
 export { withOrgSession } from "./session.js";
-export { formatGuid, initMatterGuidCounter, nextMatterGuid } from "./guidCounter.js";
+export { formatGuid, initMatterGuidCounter, nextMatterGuid, reserveMatterGuidBlock } from "./guidCounter.js";
 export { MATTER_DOCUMENT_TREE_CTE } from "./documentTree.js";
-export { recordAuditEvent, type AuditAction } from "./auditLog.js";
-export { s3Client, DOCUMENTS_BUCKET } from "./s3.js";
+export { recordAuditEvent, recordAuditEvents, type AuditAction, type AuditEvent } from "./auditLog.js";
+export { s3Client, DOCUMENTS_BUCKET, deleteS3ObjectsBestEffort } from "./s3.js";
 export { sqsClient } from "./sqs.js";
 export { recordTick, recordProcessingStart, recordProcessingResult, getWorkerHeartbeats, type WorkerHeartbeat } from "./workerHeartbeat.js";
 export { consumeQueue } from "./queues.js";
@@ -24,6 +24,8 @@ export { recordAiUsage, getAiUsageForUser, type AiUsageCallSite, type AiUsageBre
 export {
   indexDocument,
   deleteDocumentFromIndex,
+  deleteDocumentsFromIndex,
+  deleteMatterFromIndex,
   searchDocuments,
   getIndexHealth,
   SearchSyntaxError,

@@ -222,7 +222,7 @@ export function FilterPanel({
   }
 
   return (
-    <section className="col col-left" style={style} ref={rootRef as RefObject<HTMLElement> | undefined}>
+    <section className="min-h-0 flex-[0_0_auto] overflow-y-auto border-r border-line bg-panel px-3.5 py-4" style={style} ref={rootRef as RefObject<HTMLElement> | undefined}>
       <div className="section">
         <h2 className="panel-title">Search</h2>
         <Input

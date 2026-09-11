@@ -57,84 +57,6 @@ select {
   font-size: inherit;
 }
 
-/* HEADER */
-/* .app was previously unstyled — a plain block div has no height of its
-   own (height: auto shrinks to content), so nothing below it ever had a
-   real bounded height to clip against; the whole page grew to fit however
-   tall the document table happened to be, and the browser's own outer
-   scrollbar took over instead of .table-wrap's internal one. This is the
-   actual root cause of "the center panel doesn't scroll." */
-.app {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-}
-header.topbar {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  position: relative;
-  padding: 12px 20px;
-  background: var(--navy);
-  color: #fff;
-  border-bottom: 3px solid var(--seal);
-  flex: 0 0 auto;
-}
-.brand {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-.brand .mark {
-  width: 22px;
-  height: 22px;
-  border: 1.5px solid #fff;
-  border-radius: 3px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: var(--mono);
-  font-size: 11px;
-  font-weight: 600;
-  flex: none;
-}
-.brand h1 {
-  font-size: 15px;
-  font-weight: 600;
-  margin: 0;
-  letter-spacing: 0.2px;
-}
-.matter-name-display {
-  cursor: pointer;
-  border-radius: 3px;
-  padding: 2px 6px;
-  margin: -2px -6px;
-}
-.matter-name-display:hover {
-  background: rgba(255, 255, 255, 0.1);
-}
-.brand .sub {
-  font-size: 11px;
-  color: #b9c1d6;
-  font-family: var(--mono);
-}
-.matter-select {
-  background: none;
-  color: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.5);
-  padding: 7px 10px;
-  border-radius: 4px;
-  font-weight: 600;
-  font-size: 12.5px;
-  max-width: 220px;
-}
-.matter-select:hover {
-  background: rgba(255, 255, 255, 0.1);
-}
-.matter-select option {
-  color: var(--ink);
-  background: #fff;
-}
 .worker-health-bar {
   display: flex;
   gap: 8px;
@@ -151,87 +73,9 @@ header.topbar {
   border-color: var(--seal);
   color: var(--seal);
 }
-/* MAIN GRID */
-main.layout {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-}
-.col {
-  min-height: 0;
-  overflow-y: auto;
-}
-/* flex-basis for both columns comes from inline style (user-resizable via
-   the drag handles) — flex:0 0 auto here just stops them from growing or
-   shrinking away from whatever width was set. */
-.col-left {
-  flex: 0 0 auto;
-  background: var(--panel);
-  border-right: 1px solid var(--line);
-  padding: 16px 14px;
-}
-.col-right {
-  flex: 0 0 auto;
-  background: var(--panel);
-  border-left: 1px solid var(--line);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.col-center {
-  /* flex-basis 0 (not auto) — with an empty-state div and no wide table
-     inside (zero documents), an auto content-based basis let this column
-     render narrower than the real remaining space in some cases; 0 always
-     fills 100% of whatever's left over regardless of content. */
-  flex: 1 1 0;
-  display: flex;
-  flex-direction: column;
-  min-width: 200px;
-  overflow: hidden;
-}
 
-.col-resize-handle {
-  flex: 0 0 6px;
-  cursor: col-resize;
-  background: var(--line-soft);
-  position: relative;
-}
 .col-resize-handle:hover,
-.col-resize-handle.dragging {
-  background: var(--navy-soft);
-}
-.row-resize-handle {
-  flex: 0 0 6px;
-  cursor: row-resize;
-  background: var(--line-soft);
-  position: relative;
-}
 .row-resize-handle:hover,
-.row-resize-handle.dragging {
-  background: var(--navy-soft);
-}
-.row-resize-handle::after {
-  content: "";
-  position: absolute;
-  top: 2px;
-  left: 50%;
-  transform: translateX(-50%);
-  height: 2px;
-  width: 28px;
-  border-radius: 2px;
-  background: var(--line);
-}
-.col-resize-handle::after {
-  content: "";
-  position: absolute;
-  left: 2px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 2px;
-  height: 28px;
-  border-radius: 2px;
-  background: var(--line);
-}
 
 h2.panel-title {
   font-size: 10.5px;
@@ -731,31 +575,6 @@ h2.panel-title {
   text-align: center;
   color: var(--ink-soft);
   font-size: 12px;
-}
-
-/* CODING PANEL */
-/* LOGIN / LOADING SCREENS (apps/edd-workbench/client/src/main.tsx) */
-.matter-screen {
-  height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--paper);
-}
-.matter-card {
-  width: 420px;
-  max-width: 90vw;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 28px 26px;
-  box-shadow: 0 4px 24px rgba(27, 33, 48, 0.08);
-}
-.matter-card h1 {
-  font-size: 16px;
-  font-weight: 600;
-  margin: 0;
-  color: var(--ink);
 }
 
 .bulk-note {

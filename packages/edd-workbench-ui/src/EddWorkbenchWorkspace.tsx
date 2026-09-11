@@ -249,10 +249,10 @@ function EddWorkbenchWorkspaceInner({ apiBaseUrl = "http://localhost:4430/api", 
   // by checking matters === null rather than its length.
   if (matters?.length === 0) {
     return (
-      <div className="app">
-        <header className="topbar">
-          <div className="brand">
-            <span className="mark">Co</span>
+      <div className="flex h-full flex-col">
+        <header className="relative flex flex-[0_0_auto] items-center gap-5 border-b-[3px] border-seal bg-navy px-5 py-3 text-white">
+          <div className="flex items-baseline gap-2">
+            <span className="flex h-[22px] w-[22px] flex-none items-center justify-center rounded-[3px] border-[1.5px] border-white font-mono text-[11px] font-semibold">Co</span>
           </div>
           <Button size="small" className="ml-auto" onClick={() => setShowNotices(true)}>
             Notices
@@ -277,10 +277,10 @@ function EddWorkbenchWorkspaceInner({ apiBaseUrl = "http://localhost:4430/api", 
 
   if (!matters || !selectedMatter) {
     return (
-      <div className="app">
-        <header className="topbar">
-          <div className="brand">
-            <span className="mark">Co</span>
+      <div className="flex h-full flex-col">
+        <header className="relative flex flex-[0_0_auto] items-center gap-5 border-b-[3px] border-seal bg-navy px-5 py-3 text-white">
+          <div className="flex items-baseline gap-2">
+            <span className="flex h-[22px] w-[22px] flex-none items-center justify-center rounded-[3px] border-[1.5px] border-white font-mono text-[11px] font-semibold">Co</span>
           </div>
           <Button size="small" className="ml-auto" onClick={() => setShowNotices(true)}>
             Notices
@@ -299,15 +299,15 @@ function EddWorkbenchWorkspaceInner({ apiBaseUrl = "http://localhost:4430/api", 
   }
 
   return (
-    <div className="app">
-      <header className="topbar">
+    <div className="flex h-full flex-col">
+      <header className="relative flex flex-[0_0_auto] items-center gap-5 border-b-[3px] border-seal bg-navy px-5 py-3 text-white">
         {/* showSearch: a real org accumulates enough matters that scanning
             a plain dropdown stops being viable, and this is the only place
             to switch between them. */}
         <Select
           showSearch
           size="small"
-          className="matter-select"
+          className="max-w-[220px] [&_.ant-select-selector]:!border-white/50 [&_.ant-select-selector]:!bg-transparent [&_.ant-select-selection-item]:!font-semibold [&_.ant-select-selection-item]:!text-white [&_.ant-select-arrow]:!text-white"
           popupMatchSelectWidth={false}
           optionFilterProp="label"
           value={selectedMatter.id}
@@ -315,7 +315,7 @@ function EddWorkbenchWorkspaceInner({ apiBaseUrl = "http://localhost:4430/api", 
           aria-label="Select matter"
           options={matters.map((matter) => ({ value: matter.id, label: matter.name }))}
         />
-        <div className="brand">
+        <div className="flex items-baseline gap-2">
           {editingName ? (
             <Input
               variant="borderless"
@@ -335,7 +335,12 @@ function EddWorkbenchWorkspaceInner({ apiBaseUrl = "http://localhost:4430/api", 
               onBlur={commitName}
             />
           ) : (
-            <h1 className="matter-name-display" role="button" tabIndex={0} onClick={() => startEditingName(selectedMatter.name)}>
+            <h1
+              className="m-0 -mx-1.5 -my-0.5 cursor-pointer rounded-[3px] px-1.5 py-0.5 text-[15px] font-semibold tracking-[0.2px] hover:bg-white/10"
+              role="button"
+              tabIndex={0}
+              onClick={() => startEditingName(selectedMatter.name)}
+            >
               {selectedMatter.name}
             </h1>
           )}
@@ -367,7 +372,7 @@ function EddWorkbenchWorkspaceInner({ apiBaseUrl = "http://localhost:4430/api", 
       </header>
       {error && <p className="bulk-note">{error}</p>}
       {showNotices && <NoticeDialog onClose={() => setShowNotices(false)} />}
-      <main className="layout">
+      <main className="flex min-h-0 flex-1">
         <MatterDetail
           api={api}
           matterId={selectedMatter.id}

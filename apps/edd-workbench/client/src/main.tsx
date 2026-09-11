@@ -85,7 +85,7 @@ function AppShell() {
 
   if (isLoading) {
     return (
-      <div className="matter-screen">
+      <div className="flex h-screen items-center justify-center bg-paper">
         <p className="empty-note">Loading…</p>
       </div>
     );
@@ -93,13 +93,13 @@ function AppShell() {
 
   if (!isAuthenticated) {
     return (
-      <div className="matter-screen">
-        <div className="matter-card" style={{ textAlign: "center" }}>
-          <div className="brand" style={{ justifyContent: "center", marginBottom: 18 }}>
-            <span className="mark" style={{ borderColor: "var(--navy)", color: "var(--navy)" }}>
+      <div className="flex h-screen items-center justify-center bg-paper">
+        <div className="w-[420px] max-w-[90vw] rounded-lg border border-line bg-panel px-[26px] py-7 text-center shadow-[0_4px_24px_rgba(27,33,48,0.08)]">
+          <div className="mb-[18px] flex items-baseline justify-center gap-2">
+            <span className="flex h-[22px] w-[22px] flex-none items-center justify-center rounded-[3px] border-[1.5px] border-navy font-mono text-[11px] font-semibold text-navy">
               Co
             </span>
-            <h1>Collate</h1>
+            <h1 className="m-0 text-base font-semibold">Collate</h1>
           </div>
           <button type="button" onClick={() => loginWithRedirect()} style={{ width: "100%", padding: "9px 0" }}>
             Log in
@@ -118,13 +118,13 @@ function AppShell() {
             ? "Your account belongs to more than one organization, which isn't supported yet. Contact your administrator."
             : "Something went wrong while signing you in. Please try again.";
       return (
-        <div className="matter-screen">
-          <div className="matter-card" style={{ textAlign: "center" }}>
-            <div className="brand" style={{ justifyContent: "center", marginBottom: 18 }}>
-              <span className="mark" style={{ borderColor: "var(--navy)", color: "var(--navy)" }}>
+        <div className="flex h-screen items-center justify-center bg-paper">
+          <div className="w-[420px] max-w-[90vw] rounded-lg border border-line bg-panel px-[26px] py-7 text-center shadow-[0_4px_24px_rgba(27,33,48,0.08)]">
+            <div className="mb-[18px] flex items-baseline justify-center gap-2">
+              <span className="flex h-[22px] w-[22px] flex-none items-center justify-center rounded-[3px] border-[1.5px] border-navy font-mono text-[11px] font-semibold text-navy">
                 Co
               </span>
-              <h1>Collate</h1>
+              <h1 className="m-0 text-base font-semibold">Collate</h1>
             </div>
             <p className="empty-note" style={{ marginBottom: 18 }}>
               {message}
@@ -141,7 +141,7 @@ function AppShell() {
       );
     }
     return (
-      <div className="matter-screen">
+      <div className="flex h-screen items-center justify-center bg-paper">
         <p className="empty-note">Signing you in…</p>
       </div>
     );
@@ -176,14 +176,14 @@ function ViewerWindowShell({ matterId, documentId, sessionId }: { matterId: stri
 
   if (isLoading) {
     return (
-      <div className="matter-screen">
+      <div className="flex h-screen items-center justify-center bg-paper">
         <p className="empty-note">Loading…</p>
       </div>
     );
   }
   if (!isAuthenticated) {
     return (
-      <div className="matter-screen">
+      <div className="flex h-screen items-center justify-center bg-paper">
         <p className="preview-unsupported">Session expired — close this window and reopen the viewer from the main application.</p>
       </div>
     );

@@ -96,6 +96,17 @@ function useDragResize(initial: number, min: number, max: number, axis: "x" | "y
   };
 }
 
+// The drag handles between panels. The ::after pseudo-element is the small
+// grab-line down the middle, expressed with Tailwind's arbitrary-variant
+// syntax so the whole handle lives in one place rather than half here and
+// half in a stylesheet.
+const COL_RESIZE_HANDLE =
+  "relative flex-[0_0_6px] cursor-col-resize bg-line-soft hover:bg-navy-soft " +
+  "after:absolute after:left-0.5 after:top-1/2 after:h-7 after:w-0.5 after:-translate-y-1/2 after:rounded-sm after:bg-line after:content-['']";
+const ROW_RESIZE_HANDLE =
+  "relative flex-[0_0_6px] cursor-row-resize bg-line-soft hover:bg-navy-soft " +
+  "after:absolute after:left-1/2 after:top-0.5 after:h-0.5 after:w-7 after:-translate-x-1/2 after:rounded-sm after:bg-line after:content-['']";
+
 export function MatterDetail({ api, matterId, canManageAccess, currentUserId, matterCreatedBy }: MatterDetailProps) {
   // Updated on every render (not via its own effect) so it's already the
   // NEW matterId by the time any in-flight request for the OLD matterId
@@ -564,7 +575,7 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
           Loading…
         </p>
       ) : (
-        <main className="layout" style={{ flex: 1, minHeight: 0 }}>
+        <main className="flex min-h-0 flex-1">
           <FilterPanel
             api={api}
             matterId={matterId}
@@ -593,9 +604,9 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
             onAskResult={handleAskResult}
           />
 
-          <div className={`col-resize-handle${leftResize.dragging ? " dragging" : ""}`} {...leftResize.handleProps} />
+          <div className={`${COL_RESIZE_HANDLE}${leftResize.dragging ? " bg-navy-soft" : ""}`} {...leftResize.handleProps} />
 
-          <section className="col col-center">
+          <section className="flex min-w-[200px] flex-[1_1_0] flex-col overflow-hidden">
             <div className="table-toolbar">
               <span className="count">
                 DOCUMENTS {documents.length} FILTERED {filteredDocuments.length} CHECKED {checkedDocumentIds.size} SIZE{" "}
@@ -680,9 +691,9 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
             />
           </section>
 
-          <div className={`col-resize-handle${rightResize.dragging ? " dragging" : ""}`} {...rightResize.handleProps} />
+          <div className={`${COL_RESIZE_HANDLE}${rightResize.dragging ? " bg-navy-soft" : ""}`} {...rightResize.handleProps} />
 
-          <section className="col col-right" style={{ flexBasis: rightResize.size }} ref={rightResize.targetRef as React.RefObject<HTMLElement>}>
+          <section className="flex min-h-0 flex-[0_0_auto] flex-col overflow-hidden border-l border-line bg-panel" style={{ flexBasis: rightResize.size }} ref={rightResize.targetRef as React.RefObject<HTMLElement>}>
             {selectedDocument && (
               <div className="pane-title-row">
                 <h2 className="panel-title">Preview</h2>
@@ -743,7 +754,7 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
               )}
             {selectedDocument && (
               <>
-                <div className={`row-resize-handle${rowResize.dragging ? " dragging" : ""}`} {...rowResize.handleProps} />
+                <div className={`${ROW_RESIZE_HANDLE}${rowResize.dragging ? " bg-navy-soft" : ""}`} {...rowResize.handleProps} />
                 <CodingPanel
                   api={api}
                   matterId={matterId}

@@ -1,11 +1,18 @@
 import { useEffect, useRef, useState } from "react";
+import { Alert, Button } from "antd";
 import type { ApiClient } from "./api";
 
 export interface ExportButtonsProps {
   api: ApiClient;
   matterId: string;
-  /** The bulk-select checkbox column's checked ids — both buttons are scoped to exactly this set, never "everything in the matter" (see FilterPanel's own comment on this same prop). */
-  /** The checked set itself — materialized to an array only in the click handler below, not on every render. */
+  /**
+   * The bulk-select checkbox column's checked ids — both buttons are scoped
+   * to exactly this set, never "everything in the matter" (see FilterPanel's
+   * own comment on this same prop).
+   *
+   * The Set itself; materialized to an array only in the click handler
+   * below, not on every render.
+   */
   selectedDocumentIds: ReadonlySet<string>;
 }
 
@@ -95,19 +102,22 @@ export function ExportButtons({ api, matterId, selectedDocumentIds }: ExportButt
       {(["documents", "properties"] as const).map((kind) => {
         const state = kind === "documents" ? documentsState : propertiesState;
         return (
-          <button
+          <Button
             key={kind}
-            type="button"
-            className="export-btn"
-            disabled={selectedDocumentIds.size === 0 || state.inFlight}
+            block
+            size="small"
+            className="mb-1.5 justify-start"
+            icon={<span aria-hidden>▤</span>}
+            disabled={selectedDocumentIds.size === 0}
+            loading={state.inFlight}
             onClick={() => runExport(kind)}
           >
-            <span className="ico">▤</span> {state.inFlight ? "Exporting…" : KIND_LABEL[kind]}
-          </button>
+            {KIND_LABEL[kind]}
+          </Button>
         );
       })}
-      {documentsState.error && <p className="preview-unsupported">Export documents failed: {documentsState.error}</p>}
-      {propertiesState.error && <p className="preview-unsupported">Export properties failed: {propertiesState.error}</p>}
+      {documentsState.error && <Alert type="error" showIcon className="mt-1.5" message={`Export documents failed: ${documentsState.error}`} />}
+      {propertiesState.error && <Alert type="error" showIcon className="mt-1.5" message={`Export properties failed: ${propertiesState.error}`} />}
     </>
   );
 }

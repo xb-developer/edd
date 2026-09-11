@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Alert, Button, Checkbox, Input, Segmented, Select } from "antd";
 import type { CSSProperties, RefObject } from "react";
 import type { ApiClient } from "./api";
 import type { TagSetDTO, MatterMemberDTO, MatterMemberCandidateDTO, DocumentDTO, AskResultDTO } from "./types";
@@ -224,17 +225,22 @@ export function FilterPanel({
     <section className="col col-left" style={style} ref={rootRef as RefObject<HTMLElement> | undefined}>
       <div className="section">
         <h2 className="panel-title">Search</h2>
-        <input
-          className="search-box"
+        <Input
+          allowClear
+          size="small"
+          className="mb-1.5"
           placeholder='Search documents… (AND, OR, NOT, "phrase", (grouping))'
           title='Search documents… AND / OR / NOT, ( ) for grouping, "exact phrase", +required, -excluded, * wildcard'
           value={searchQuery}
           onChange={(e) => onSearchQueryChange(e.target.value)}
         />
-        <button type="button" className="pop-out-btn" onClick={() => onSearchQueryChange("")} disabled={!searchQuery}>
+        {/* Kept alongside Input's own allowClear "x": the x only appears
+            once there's text and is easy to miss at this size, and this
+            button was added deliberately as a discoverable control. */}
+        <Button size="small" block onClick={() => onSearchQueryChange("")} disabled={!searchQuery}>
           Clear Search
-        </button>
-        {searchError && <p className="bulk-note">{searchError}</p>}
+        </Button>
+        {searchError && <Alert type="warning" showIcon className="mt-1.5" message={searchError} />}
         {searchTotalHits !== null && matchingDocumentCount !== null && searchTotalHits > matchingDocumentCount && (
           <p className="bulk-note">
             Showing first {matchingDocumentCount} of {searchTotalHits} matches — narrow your search
@@ -244,21 +250,24 @@ export function FilterPanel({
 
       <div className="section">
         <h2 className="panel-title">Question</h2>
-        <textarea
-          className="search-box"
+        <Input.TextArea
           rows={3}
+          size="small"
           placeholder="Ask a question about this matter…"
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
         />
-        {askError && <p className="bulk-note">{askError}</p>}
-        <div className="ask-row">
-          <button type="button" className="pop-out-btn" onClick={handleClearQuestion} disabled={!question && !askError}>
+        {askError && <Alert type="error" showIcon className="mt-1.5" message={askError} />}
+        <div className="mt-1.5 flex justify-end gap-1.5">
+          <Button size="small" onClick={handleClearQuestion} disabled={!question && !askError}>
             Clear
-          </button>
-          <button type="button" className="pop-out-btn" onClick={handleAsk} disabled={!question.trim() || asking}>
-            {asking ? "Asking…" : "Ask"}
-          </button>
+          </Button>
+          {/* `loading` rather than an "Asking…" label swap — /ask can take
+              several seconds (embed, similarity search, then generation),
+              so a spinner is the honest affordance here. */}
+          <Button size="small" type="primary" onClick={handleAsk} disabled={!question.trim()} loading={asking}>
+            Ask
+          </Button>
         </div>
       </div>
 
@@ -268,18 +277,21 @@ export function FilterPanel({
           <p className="empty-note">No tags configured for this matter.</p>
         ) : (
           <>
-            <div className="mode-toggle">
-              <button type="button" className={matchMode === "all" ? "active" : ""} onClick={() => onMatchModeChange("all")}>
-                Match all
-              </button>
-              <button type="button" className={matchMode === "any" ? "active" : ""} onClick={() => onMatchModeChange("any")}>
-                Match any
-              </button>
-            </div>
+            <Segmented
+              block
+              size="small"
+              className="mb-1.5"
+              value={matchMode}
+              onChange={(value) => onMatchModeChange(value as "all" | "any")}
+              options={[
+                { label: "Match all", value: "all" },
+                { label: "Match any", value: "any" },
+              ]}
+            />
             <div className="tag-filter-list">
               {allTags.map((tag) => (
                 <label key={tag.id} className="tag-filter-row">
-                  <input type="checkbox" checked={selectedTagIds.includes(tag.id)} onChange={() => onToggleTagId(tag.id)} />
+                  <Checkbox checked={selectedTagIds.includes(tag.id)} onChange={() => onToggleTagId(tag.id)} />
                   <span className="tag-dot" style={{ background: tag.color ?? "var(--ink-soft)" }} />
                   <span>{tag.name}</span>
                   <span className="cnt">{countForTag(tag.id)}</span>
@@ -287,9 +299,9 @@ export function FilterPanel({
               ))}
             </div>
             {selectedTagIds.length > 0 && (
-              <button type="button" className="clear-filters" onClick={onClearTagFilter}>
+              <Button size="small" block type="text" onClick={onClearTagFilter}>
                 Clear tag filter
-              </button>
+              </Button>
             )}
           </>
         )}
@@ -297,18 +309,17 @@ export function FilterPanel({
 
       <div className="section">
         <h2 className="panel-title">Processing Filter</h2>
-        <select
-          className="search-box"
+        <Select<IngestStatusFilter>
+          size="small"
+          className="mb-1.5 w-full"
           aria-label="Filter by processing status"
           value={statusFilter}
-          onChange={(e) => onStatusFilterChange(e.target.value as IngestStatusFilter)}
-        >
-          {STATUS_FILTER_OPTIONS.map(({ value, label }) => (
-            <option key={value} value={value}>
-              {label} ({value === "all" ? documents.length : countForStatus(value)})
-            </option>
-          ))}
-        </select>
+          onChange={onStatusFilterChange}
+          options={STATUS_FILTER_OPTIONS.map(({ value, label }) => ({
+            value,
+            label: `${label} (${value === "all" ? documents.length : countForStatus(value)})`,
+          }))}
+        />
         <RetryIngestButton api={api} matterId={matterId} documentIds={failedSelectedDocumentIds} onRetried={onDocumentsChanged} />
         <p className="export-hint">
           {failedSelectedDocumentIds.length === 0

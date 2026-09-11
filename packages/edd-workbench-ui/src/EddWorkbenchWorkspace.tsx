@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ConfigProvider } from "antd";
+import { Button, ConfigProvider, Input, Select } from "antd";
 import { antdTheme } from "./antdTheme";
 import { createApiClient } from "./api";
 import type { MatterDTO } from "./types";
@@ -254,13 +254,13 @@ function EddWorkbenchWorkspaceInner({ apiBaseUrl = "http://localhost:4430/api", 
           <div className="brand">
             <span className="mark">Co</span>
           </div>
-          <button type="button" className="topbar-btn" onClick={() => setShowNotices(true)}>
+          <Button size="small" className="topbar-btn" onClick={() => setShowNotices(true)}>
             Notices
-          </button>
+          </Button>
           {onLogout && (
-            <button type="button" className="topbar-btn" onClick={handleLogout}>
+            <Button size="small" className="topbar-btn" onClick={handleLogout}>
               Log out
-            </button>
+            </Button>
           )}
         </header>
         <p className="empty-note" style={{ padding: 24 }}>
@@ -282,13 +282,13 @@ function EddWorkbenchWorkspaceInner({ apiBaseUrl = "http://localhost:4430/api", 
           <div className="brand">
             <span className="mark">Co</span>
           </div>
-          <button type="button" className="topbar-btn" onClick={() => setShowNotices(true)}>
+          <Button size="small" className="topbar-btn" onClick={() => setShowNotices(true)}>
             Notices
-          </button>
+          </Button>
           {onLogout && (
-            <button type="button" className="topbar-btn" onClick={handleLogout}>
+            <Button size="small" className="topbar-btn" onClick={handleLogout}>
               Log out
-            </button>
+            </Button>
           )}
         </header>
         <p className="empty-note">Loading…</p>
@@ -301,17 +301,25 @@ function EddWorkbenchWorkspaceInner({ apiBaseUrl = "http://localhost:4430/api", 
   return (
     <div className="app">
       <header className="topbar">
-        <select className="matter-select" value={selectedMatter.id} onChange={(e) => selectMatter(e.target.value)} aria-label="Select matter">
-          {matters.map((matter) => (
-            <option key={matter.id} value={matter.id}>
-              {matter.name}
-            </option>
-          ))}
-        </select>
+        {/* showSearch: a real org accumulates enough matters that scanning
+            a plain dropdown stops being viable, and this is the only place
+            to switch between them. */}
+        <Select
+          showSearch
+          size="small"
+          className="matter-select"
+          popupMatchSelectWidth={false}
+          optionFilterProp="label"
+          value={selectedMatter.id}
+          onChange={selectMatter}
+          aria-label="Select matter"
+          options={matters.map((matter) => ({ value: matter.id, label: matter.name }))}
+        />
         <div className="brand">
           {editingName ? (
-            <input
+            <Input
               className="matter-name-input"
+              size="small"
               autoFocus
               value={nameInput}
               onChange={(e) => setNameInput(e.target.value)}
@@ -332,28 +340,28 @@ function EddWorkbenchWorkspaceInner({ apiBaseUrl = "http://localhost:4430/api", 
           )}
         </div>
         {canCreateMatters && (
-          <button type="button" className="topbar-btn" style={{ marginLeft: 0 }} onClick={handleCreateMatter} disabled={creating}>
-            {creating ? "Creating…" : "Create Matter"}
-          </button>
+          <Button size="small" className="topbar-btn ml-0" onClick={handleCreateMatter} loading={creating}>
+            Create Matter
+          </Button>
         )}
         {canDownloadAuditLog && (
-          <button type="button" className="topbar-btn" style={{ marginLeft: 0 }} onClick={handleDownloadAuditLog} disabled={downloadingAudit}>
-            {downloadingAudit ? "Downloading…" : "Download Audit Log"}
-          </button>
+          <Button size="small" className="topbar-btn ml-0" onClick={handleDownloadAuditLog} loading={downloadingAudit}>
+            Download Audit Log
+          </Button>
         )}
         {canDeleteMatter && (
-          <button type="button" className="topbar-btn" style={{ marginLeft: 0 }} onClick={handleDeleteMatter} disabled={deletingMatter}>
-            {deletingMatter ? "Deleting…" : "Delete Matter"}
-          </button>
+          <Button size="small" className="topbar-btn ml-0" onClick={handleDeleteMatter} loading={deletingMatter}>
+            Delete Matter
+          </Button>
         )}
         <WorkerHealthBar api={api} matterId={selectedMatter.id} />
-        <button type="button" className="topbar-btn" onClick={() => setShowNotices(true)}>
+        <Button size="small" className="topbar-btn" onClick={() => setShowNotices(true)}>
           Notices
-        </button>
+        </Button>
         {onLogout && (
-          <button type="button" className="topbar-btn" onClick={handleLogout}>
+          <Button size="small" className="topbar-btn" onClick={handleLogout}>
             Log out
-          </button>
+          </Button>
         )}
       </header>
       {error && <p className="bulk-note">{error}</p>}

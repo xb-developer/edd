@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Alert, Button } from "antd";
 import type { ApiClient } from "./api";
 
 export interface RetryIngestButtonProps {
@@ -37,10 +38,21 @@ export function RetryIngestButton({ api, matterId, documentIds, onRetried }: Ret
 
   return (
     <>
-      <button type="button" className="export-btn" disabled={documentIds.length === 0 || inFlight} onClick={handleRetry}>
-        <span className="ico">↻</span> {inFlight ? "Retrying…" : "Retry ingest"}
-      </button>
-      {error && <p className="preview-unsupported">Retry failed: {error}</p>}
+      {/* `loading` replaces the old "Retrying…" label swap: antd shows a
+          spinner and disables the button itself, so in-flight state can't
+          drift out of step with the disabled state. */}
+      <Button
+        block
+        size="small"
+        className="mb-1.5 justify-start"
+        icon={<span aria-hidden>↻</span>}
+        disabled={documentIds.length === 0}
+        loading={inFlight}
+        onClick={handleRetry}
+      >
+        Retry ingest
+      </Button>
+      {error && <Alert type="error" showIcon className="mt-1.5" message={`Retry failed: ${error}`} />}
     </>
   );
 }

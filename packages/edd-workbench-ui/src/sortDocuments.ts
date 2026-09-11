@@ -39,6 +39,15 @@ export type SortableColumn =
  * descending; it's just missing, and reviewers scanning a sorted column
  * expect the real values grouped together regardless of direction.
  */
+// guid/familyGuid (zero-padded fixed-width numeric strings) and the ISO
+// 8601 timestamp columns already sort correctly under a plain `<`/`>`
+// comparison — this function's own doc comment above says so. Skipping
+// ICU locale-aware collation for exactly these (not the genuinely textual
+// columns, which still want localeCompare for sensible human ordering)
+// avoids real per-comparison overhead on a large document list with no
+// change in the resulting order.
+const PLAIN_COMPARABLE_COLUMNS = new Set<SortableColumn>(["guid", "familyGuid", "docDate", "fileModifiedAt", "contentModifiedAt"]);
+
 export function sortDocuments<T extends DocumentDTO>(docs: T[], column: SortableColumn, direction: SortDirection): T[] {
   const multiplier = direction === "asc" ? 1 : -1;
   return [...docs].sort((a, b) => {
@@ -48,6 +57,9 @@ export function sortDocuments<T extends DocumentDTO>(docs: T[], column: Sortable
     if (va === null) return 1;
     if (vb === null) return -1;
     if (typeof va === "number" && typeof vb === "number") return (va - vb) * multiplier;
-    return String(va).localeCompare(String(vb)) * multiplier;
+    const sa = String(va);
+    const sb = String(vb);
+    if (PLAIN_COMPARABLE_COLUMNS.has(column)) return (sa < sb ? -1 : sa > sb ? 1 : 0) * multiplier;
+    return sa.localeCompare(sb) * multiplier;
   });
 }

@@ -93,9 +93,24 @@ export function FilterPanel({
   onAskResult,
 }: FilterPanelProps) {
   const allTags = tagSets.flatMap((tagSet) => tagSet.tags);
-  const countForTag = (tagId: string) => Object.values(appliedTagsByDocument).filter((tagIds) => tagIds.includes(tagId)).length;
-  const countForStatus = (status: Exclude<IngestStatusFilter, "all">) =>
-    status === "ocr" ? documents.filter((d) => d.ocrStatus === "ready").length : documents.filter((d) => d.ingestStatus === status).length;
+  // One pass over appliedTagsByDocument/documents building every count at
+  // once, not one full rescan per tag/status option — with N tags and M
+  // documents, the previous per-option `.filter()` calls did O(N×M) work
+  // (and a further O(M) status scan per status option) on every render,
+  // including renders triggered by unrelated state (a search keystroke, a
+  // checkbox click, an ingest-poll tick).
+  const tagCounts = new Map<string, number>();
+  for (const tagIds of Object.values(appliedTagsByDocument)) {
+    for (const tagId of tagIds) tagCounts.set(tagId, (tagCounts.get(tagId) ?? 0) + 1);
+  }
+  const countForTag = (tagId: string) => tagCounts.get(tagId) ?? 0;
+
+  const statusCounts = { pending: 0, processing: 0, ready: 0, failed: 0, ocr: 0 };
+  for (const d of documents) {
+    statusCounts[d.ingestStatus]++;
+    if (d.ocrStatus === "ready") statusCounts.ocr++;
+  }
+  const countForStatus = (status: Exclude<IngestStatusFilter, "all">) => statusCounts[status];
   // Retry only ever sends genuinely-failed ids — a broader multi-select
   // (e.g. spanning failed + ready) silently narrows to just the failed
   // ones rather than 400ing the whole request, since the server enforces

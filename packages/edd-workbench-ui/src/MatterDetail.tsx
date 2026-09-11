@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import type { ApiClient } from "./api";
@@ -487,21 +487,29 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
     }
   }
 
-  const filteredDocuments =
-    documents?.filter((doc) => {
-      const matchesSearch = matchingDocumentIds === null || matchingDocumentIds.has(doc.documentId);
-      if (!matchesSearch) return false;
-      const matchesAsk = askRelevantDocumentIds === null || askRelevantDocumentIds.has(doc.documentId);
-      if (!matchesAsk) return false;
-      if (statusFilter === "ocr") {
-        if (doc.ocrStatus !== "ready") return false;
-      } else if (statusFilter !== "all" && doc.ingestStatus !== statusFilter) {
-        return false;
-      }
-      if (selectedTagIds.length === 0) return true;
-      const appliedIds = appliedTagsByDocument[doc.documentId] ?? [];
-      return tagMatchMode === "all" ? selectedTagIds.every((id) => appliedIds.includes(id)) : selectedTagIds.some((id) => appliedIds.includes(id));
-    }) ?? null;
+  // Memoized — without this, every render (a search keystroke before the
+  // debounce even fires, a checkbox click, an ingest-poll tick 3s apart)
+  // re-ran a full filter/sort pass over the whole document list, even
+  // though most renders touch state this computation doesn't depend on at
+  // all.
+  const filteredDocuments = useMemo(
+    () =>
+      documents?.filter((doc) => {
+        const matchesSearch = matchingDocumentIds === null || matchingDocumentIds.has(doc.documentId);
+        if (!matchesSearch) return false;
+        const matchesAsk = askRelevantDocumentIds === null || askRelevantDocumentIds.has(doc.documentId);
+        if (!matchesAsk) return false;
+        if (statusFilter === "ocr") {
+          if (doc.ocrStatus !== "ready") return false;
+        } else if (statusFilter !== "all" && doc.ingestStatus !== statusFilter) {
+          return false;
+        }
+        if (selectedTagIds.length === 0) return true;
+        const appliedIds = appliedTagsByDocument[doc.documentId] ?? [];
+        return tagMatchMode === "all" ? selectedTagIds.every((id) => appliedIds.includes(id)) : selectedTagIds.some((id) => appliedIds.includes(id));
+      }) ?? null,
+    [documents, matchingDocumentIds, askRelevantDocumentIds, statusFilter, selectedTagIds, appliedTagsByDocument, tagMatchMode],
+  );
 
   const visibleCheckedCount = filteredDocuments?.filter((d) => checkedDocumentIds.has(d.documentId)).length ?? 0;
   const hiddenCheckedCount = checkedDocumentIds.size - visibleCheckedCount;
@@ -513,7 +521,12 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
   // everything render/navigation-facing below so Prev/Next and the table's
   // own row order both match whatever the reviewer actually sees after a
   // column-header sort, not the underlying filtered-but-unsorted order.
-  const sortedDocuments = filteredDocuments && sortColumn ? sortDocuments(filteredDocuments, sortColumn, sortDirection) : filteredDocuments;
+  // Memoized for the same reason filteredDocuments is — sorting is the
+  // more expensive of the two passes.
+  const sortedDocuments = useMemo(
+    () => (filteredDocuments && sortColumn ? sortDocuments(filteredDocuments, sortColumn, sortDirection) : filteredDocuments),
+    [filteredDocuments, sortColumn, sortDirection],
+  );
 
   const selectedDocument = sortedDocuments?.find((d) => d.documentId === selectedDocumentId) ?? null;
   const selectedIndex = sortedDocuments?.findIndex((d) => d.documentId === selectedDocumentId) ?? -1;

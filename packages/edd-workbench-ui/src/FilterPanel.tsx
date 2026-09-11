@@ -356,16 +356,16 @@ export function FilterPanel({
                     <td className="access-list-name">{member.name ?? member.email}</td>
                     {canManageAccess && (
                       <td className="access-list-remove">
-                        <button
-                          type="button"
-                          className="access-list-remove-btn"
+                        <Button
+                          type="text"
+                          size="small"
                           aria-label={isCreatorRemovingSelf ? "The matter's creator cannot remove themselves" : `Remove ${member.email}`}
                           title={isCreatorRemovingSelf ? "The matter's creator cannot remove themselves from its access list" : undefined}
                           disabled={busyUserId === member.userId || isCreatorRemovingSelf}
                           onClick={() => handleRemoveMember(member)}
                         >
                           ×
-                        </button>
+                        </Button>
                       </td>
                     )}
                   </tr>
@@ -400,9 +400,9 @@ export function FilterPanel({
                 ) : (
                   <tr>
                     <td colSpan={2}>
-                      <button type="button" className="access-list-add-btn" aria-label="Add a user to this matter's access list" onClick={openAddRow}>
+                      <Button type="dashed" size="small" block aria-label="Add a user to this matter's access list" onClick={openAddRow}>
                         +
-                      </button>
+                      </Button>
                     </td>
                   </tr>
                 ))}

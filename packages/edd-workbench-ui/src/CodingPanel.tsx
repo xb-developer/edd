@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Alert, Button, Input, Space } from "antd";
 import type { ApiClient } from "./api";
 import type { TagSetDTO } from "./types";
 
@@ -6,8 +7,15 @@ export interface CodingPanelProps {
   api: ApiClient;
   matterId: string;
   documentId: string;
-  /** Independent of `documentId` — the bulk-select checkbox column's checked ids. Non-empty switches the whole panel into bulk-apply mode; `documentId` (the single-preview target) is ignored while that's the case. */
-  /** The checked set itself, NOT a fresh `Array.from(...)` per render — a new array every render would change identity every render and silently defeat `bulkAppliedCountByTagId`'s memo below (same reason FilterPanel takes the Set). */
+  /**
+   * Independent of `documentId` — the bulk-select checkbox column's checked
+   * ids. Non-empty switches the whole panel into bulk-apply mode;
+   * `documentId` (the single-preview target) is ignored while that's true.
+   *
+   * The Set itself, NOT a fresh `Array.from(...)` per render: a new array
+   * every render changes identity every render, which would silently defeat
+   * `bulkAppliedCountByTagId`'s memo below.
+   */
   bulkSelectedDocumentIds: ReadonlySet<string>;
   onClearBulkSelection: () => void;
   /** Lifted to MatterDetail (shared with the results table's own tag chips) — needed here so bulk mode can invert each selected document's OWN current state for a tag, not force every document to the same state. */
@@ -24,6 +32,24 @@ export interface CodingPanelProps {
   /** viewerWindow.focusPopout — every button here is a click inside the main window, which would otherwise drop an open pop-out behind it (see useViewerWindow's doc comment); call before each action, same as MatterDetail's row/checkbox handlers. */
   onFocusPopout: () => void;
 }
+
+// Tag toggles are deliberately NOT antd Buttons: they have three states, and
+// antd's Button has no notion of "partially applied". Styling is Tailwind;
+// only the state logic lives in the component.
+const TAG_TOGGLE_BASE = "rounded-[14px] border px-2.5 py-[5px] text-[11.5px] font-semibold transition-colors";
+const TAG_TOGGLE_STATE = {
+  // Deliberately the same light blue for every tag regardless of that tag's
+  // own configured colour (still used as an identification swatch in
+  // FilterPanel's tag-dot and the table's chips) — "applied" is not meant to
+  // double as a per-tag colour code.
+  on: "border-[#a9cdf5] bg-[#d3e6fb] text-navy",
+  // Bulk mode only: some but not all of the checked documents already have
+  // this code. Dashed on a paler fill, so it reads as "partially applied"
+  // rather than "applied" — the next click still inverts each document's own
+  // state rather than applying uniformly.
+  mixed: "border-dashed border-[#a9cdf5] bg-[#eef6fe] text-navy",
+  off: "border-line bg-panel text-ink-soft hover:border-ink-soft",
+} as const;
 
 // Scaffolded ahead of the coding/tagging backend originally (see api.ts's
 // history) — now backed by a real matter-scoped schema (tag_sets/tags/
@@ -126,21 +152,18 @@ export function CodingPanel({
       <div className="pane-title-row">
         <h2 className="panel-title">{isBulkMode ? `Applying to ${bulkSelectedDocumentIds.size} selected document${bulkSelectedDocumentIds.size === 1 ? "" : "s"}` : "Coding"}</h2>
         {isBulkMode ? (
-          <button
-            type="button"
-            className="pop-out-btn"
+          <Button
+            size="small"
             onClick={() => {
               onFocusPopout();
               onClearBulkSelection();
             }}
           >
             Clear selection
-          </button>
+          </Button>
         ) : (
-          <div className="doc-nav-btns">
-            <button
-              type="button"
-              className="pop-out-btn"
+          <Space.Compact size="small">
+            <Button
               disabled={!canGoPrev}
               onClick={() => {
                 onFocusPopout();
@@ -148,10 +171,8 @@ export function CodingPanel({
               }}
             >
               ‹ Prev
-            </button>
-            <button
-              type="button"
-              className="pop-out-btn"
+            </Button>
+            <Button
               disabled={!canGoNext}
               onClick={() => {
                 onFocusPopout();
@@ -159,17 +180,17 @@ export function CodingPanel({
               }}
             >
               Next ›
-            </button>
-          </div>
+            </Button>
+          </Space.Compact>
         )}
       </div>
       <div className="panel-body">
-        {error && <p className="preview-unsupported">{error}</p>}
+        {error && <Alert type="error" showIcon className="mb-2" message={error} />}
         {!error &&
           tagSets.map((tagSet) => (
             <div key={tagSet.id} className="section">
               <h2 className="panel-title">{tagSet.name}</h2>
-              <div className="tag-toggle-grid">
+              <div className="mb-3.5 flex flex-wrap gap-1.5">
                 {tagSet.tags.map((tag) => {
                   if (!isBulkMode) {
                     const isApplied = appliedTagIds.includes(tag.id);
@@ -177,7 +198,7 @@ export function CodingPanel({
                       <button
                         key={tag.id}
                         type="button"
-                        className={`tag-toggle${isApplied ? " on" : ""}`}
+                        className={`${TAG_TOGGLE_BASE} ${isApplied ? TAG_TOGGLE_STATE.on : TAG_TOGGLE_STATE.off}`}
                         onClick={() => {
                           onFocusPopout();
                           toggleTag(tag.id);
@@ -194,12 +215,12 @@ export function CodingPanel({
                   // needs to look visibly different from a clean "none of
                   // them do" so the click's real effect isn't a surprise.
                   const appliedCount = bulkAppliedCountByTagId.get(tag.id) ?? 0;
-                  const bulkState = appliedCount === 0 ? "" : appliedCount === bulkSelectedDocumentIds.size ? " on" : " mixed";
+                  const bulkState = appliedCount === 0 ? "off" : appliedCount === bulkSelectedDocumentIds.size ? "on" : "mixed";
                   return (
                     <button
                       key={tag.id}
                       type="button"
-                      className={`tag-toggle${bulkState}`}
+                      className={`${TAG_TOGGLE_BASE} ${TAG_TOGGLE_STATE[bulkState]}`}
                       onClick={() => {
                         onFocusPopout();
                         toggleTag(tag.id);
@@ -215,9 +236,8 @@ export function CodingPanel({
         {!error && tagSets.length === 0 && <p className="empty-note">No tag sets configured for this matter.</p>}
         <div className="section">
           <h2 className="panel-title">Custom code</h2>
-          <div className="custom-tag-row">
-            <input
-              className="search-box"
+          <Space.Compact size="small" className="w-full">
+            <Input
               placeholder="New code name…"
               value={customTagName}
               onChange={(e) => setCustomTagName(e.target.value)}
@@ -228,18 +248,17 @@ export function CodingPanel({
                 }
               }}
             />
-            <button
-              type="button"
-              className="pop-out-btn"
-              disabled={!customTagName.trim() || creatingTag}
+            <Button
+              disabled={!customTagName.trim()}
+              loading={creatingTag}
               onClick={() => {
                 onFocusPopout();
                 handleCreateCustomTag();
               }}
             >
-              {creatingTag ? "Adding…" : "Add"}
-            </button>
-          </div>
+              Add
+            </Button>
+          </Space.Compact>
         </div>
       </div>
     </div>

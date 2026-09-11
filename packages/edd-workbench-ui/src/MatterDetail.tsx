@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { Alert, Button } from "antd";
 import { ConfigProvider } from "antd";
 import { StyleProvider } from "@ant-design/cssinjs";
 import { antdTheme } from "./antdTheme";
@@ -492,9 +493,9 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
         <div className="import-failures-banner">
           <div className="import-failures-head">
             <span>{error}</span>
-            <button type="button" className="row-delete-btn" onClick={() => setError(null)} aria-label="Dismiss">
+            <Button type="text" size="small" onClick={() => setError(null)} aria-label="Dismiss">
               ×
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -531,9 +532,9 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
             />
           </div>
           {(documentImport.ingestProgress.gaveUp || documentImport.ingestProgress.failed > 0) && (
-            <button type="button" className="row-delete-btn" onClick={documentImport.dismissIngestProgress} aria-label="Dismiss">
+            <Button type="text" size="small" onClick={documentImport.dismissIngestProgress} aria-label="Dismiss">
               ×
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -544,9 +545,9 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
             <span>
               {documentImport.importFailures.length} file{documentImport.importFailures.length === 1 ? "" : "s"} failed to import
             </span>
-            <button type="button" className="row-delete-btn" onClick={documentImport.dismissFailures} aria-label="Dismiss">
+            <Button type="text" size="small" onClick={documentImport.dismissFailures} aria-label="Dismiss">
               ×
-            </button>
+            </Button>
           </div>
           <ul className="import-failures-list">
             {documentImport.importFailures.map((failure, i) => (
@@ -603,24 +604,25 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
               {checkedDocumentIds.size > 0 && (
                 <span className="count">
                   {hiddenCheckedCount > 0 ? `${hiddenCheckedCount} not shown by current filter` : null}
-                  <button type="button" className="clear-filters" onClick={() => setCheckedDocumentIds(new Set())}>
+                  <Button type="text" size="small" onClick={() => setCheckedDocumentIds(new Set())}>
                     Clear
-                  </button>
-                  <button
-                    type="button"
-                    className="pop-out-btn"
-                    style={{ borderColor: "var(--seal)", color: "var(--seal)" }}
-                    onClick={() => setShowBulkDeleteConfirm(true)}
-                  >
+                  </Button>
+                  {/* `danger` replaces the inline --seal border/colour: antd
+                      derives it from colorError, which antdTheme.ts maps to
+                      that same token. */}
+                  <Button danger size="small" onClick={() => setShowBulkDeleteConfirm(true)}>
                     Delete {checkedDocumentIds.size}
-                  </button>
+                  </Button>
                 </span>
               )}
-              <button type="button" className="import-btn" disabled={documentImport.importing} onClick={() => fileInputRef.current?.click()}>
+              {/* The label still carries the live n/total count, which
+                  `loading` alone can't express — so this one keeps its
+                  label swap and gets the spinner as well. */}
+              <Button type="primary" size="small" loading={documentImport.importing} onClick={() => fileInputRef.current?.click()}>
                 {documentImport.importProgress
                   ? `Importing ${documentImport.importProgress.current}/${documentImport.importProgress.total}…`
                   : "+ Import documents"}
-              </button>
+              </Button>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -689,17 +691,17 @@ export function MatterDetail({ api, matterId, canManageAccess, currentUserId, ma
                   // underlying popOutPiP/pipSupported functionality in
                   // useViewerWindow is untouched, just unreachable from here
                   // for now, so restoring the button is a one-line revert.
-                  <button type="button" className="pop-out-btn" onClick={() => viewerWindow.popOut(selectedDocument.documentId)}>
+                  <Button size="small" onClick={() => viewerWindow.popOut(selectedDocument.documentId)}>
                     ⧉ Pop out
-                  </button>
+                  </Button>
                 ) : (
-                  <button type="button" className="pop-out-btn" onClick={viewerWindow.dockBack}>
+                  <Button size="small" onClick={viewerWindow.dockBack}>
                     Dock back
-                  </button>
+                  </Button>
                 )}
               </div>
             )}
-            {viewerWindow.popOutError && <p className="preview-unsupported">{viewerWindow.popOutError}</p>}
+            {viewerWindow.popOutError && <Alert type="warning" showIcon className="mb-2" message={viewerWindow.popOutError} />}
             <div className="panel-body" style={{ flexBasis: rowResize.size, flexGrow: 0, flexShrink: 0 }} ref={rowResize.targetRef as React.RefObject<HTMLDivElement>}>
               {!selectedDocument ? (
                 <p className="no-selection">Select a document to preview it.</p>

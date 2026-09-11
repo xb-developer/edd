@@ -113,22 +113,6 @@ header.topbar {
 .matter-name-display:hover {
   background: rgba(255, 255, 255, 0.1);
 }
-.matter-name-input {
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: 0.2px;
-  font-family: inherit;
-  color: #fff;
-  background: rgba(255, 255, 255, 0.12);
-  border: 1px solid rgba(255, 255, 255, 0.5);
-  border-radius: 3px;
-  padding: 2px 6px;
-  margin: -3px -6px;
-}
-.matter-name-input:focus {
-  outline: none;
-  border-color: #fff;
-}
 .brand .sub {
   font-size: 11px;
   color: #b9c1d6;
@@ -150,19 +134,6 @@ header.topbar {
 .matter-select option {
   color: var(--ink);
   background: #fff;
-}
-.topbar-btn {
-  background: none;
-  color: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.5);
-  padding: 8px 14px;
-  border-radius: 4px;
-  font-weight: 600;
-  font-size: 12.5px;
-  margin-left: auto;
-}
-.topbar-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
 }
 .worker-health-bar {
   display: flex;
@@ -279,50 +250,7 @@ h2.panel-title {
   font-style: italic;
   padding: 4px 2px;
 }
-.clear-filters {
-  font-size: 11px;
-  color: var(--seal);
-  background: none;
-  border: none;
-  padding: 0;
-  text-decoration: underline;
-}
 
-/* LEFT PANEL (search / tag filter / export) */
-.search-box {
-  width: 100%;
-  padding: 7px 9px;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  margin-bottom: 14px;
-  font-size: 12.5px;
-  background: var(--paper);
-}
-.search-box:focus {
-  outline: none;
-  border-color: var(--navy);
-  background: #fff;
-}
-.mode-toggle {
-  display: flex;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  overflow: hidden;
-  margin-bottom: 10px;
-}
-.mode-toggle button {
-  flex: 1;
-  padding: 5px 0;
-  border: none;
-  background: var(--panel);
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--ink-soft);
-}
-.mode-toggle button.active {
-  background: var(--navy);
-  color: #fff;
-}
 .tag-filter-list {
   display: flex;
   flex-direction: column;
@@ -355,33 +283,6 @@ h2.panel-title {
   border-radius: 50%;
   flex: none;
 }
-.export-btn {
-  width: 100%;
-  padding: 9px 10px;
-  border-radius: 4px;
-  border: 1px solid var(--line);
-  background: var(--paper);
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--ink);
-  text-align: left;
-  margin-bottom: 8px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.export-btn:hover {
-  border-color: var(--navy);
-  background: var(--navy-soft);
-}
-.export-btn .ico {
-  font-family: var(--mono);
-  color: var(--seal);
-}
-.export-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
 .export-hint {
   font-size: 10.5px;
   color: var(--ink-soft);
@@ -405,24 +306,7 @@ h2.panel-title {
   text-align: right;
 }
 .access-list-remove-btn,
-.access-list-add-btn {
-  background: none;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  color: var(--ink-soft);
-  font-size: 12px;
-  line-height: 1;
-  padding: 2px 7px;
-  cursor: pointer;
-}
 .access-list-remove-btn:hover,
-.access-list-add-btn:hover {
-  border-color: var(--navy);
-  color: var(--navy);
-}
-.access-list-add-btn {
-  margin-top: 6px;
-}
 .access-list-select {
   width: 100%;
   margin-top: 6px;
@@ -445,25 +329,6 @@ h2.panel-title {
   font-family: var(--mono);
   font-size: 11.5px;
   color: var(--ink-soft);
-}
-.import-btn {
-  background: var(--seal);
-  color: #fff;
-  border: none;
-  padding: 8px 14px;
-  border-radius: 4px;
-  font-weight: 600;
-  font-size: 12.5px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.import-btn:hover {
-  background: #8f2e25;
-}
-.import-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 .import-progress-banner {
   display: flex;
@@ -709,34 +574,6 @@ h2.panel-title {
   border: none;
   background: none;
 }
-.pop-out-btn {
-  flex: none;
-  font-size: 10.5px;
-  font-weight: 600;
-  color: var(--ink-soft);
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  padding: 3px 8px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  white-space: nowrap;
-}
-.pop-out-btn:hover {
-  border-color: var(--navy);
-  color: var(--navy);
-  background: var(--navy-soft);
-}
-.pop-out-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-.doc-nav-btns {
-  display: flex;
-  gap: 6px;
-  flex: none;
-}
 .panel-body {
   flex: 1;
   overflow-y: auto;
@@ -871,26 +708,6 @@ h2.panel-title {
   font-size: 11.5px;
   white-space: pre-wrap;
 }
-.preview-sheet-tabs {
-  display: flex;
-  gap: 4px;
-  margin-bottom: 8px;
-  flex-wrap: wrap;
-}
-.preview-sheet-tabs button {
-  padding: 4px 10px;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  background: var(--panel);
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--ink-soft);
-}
-.preview-sheet-tabs button.active {
-  background: var(--navy);
-  color: #fff;
-  border-color: var(--navy);
-}
 .preview-table-wrap {
   overflow: auto;
   max-height: 420px;
@@ -917,41 +734,6 @@ h2.panel-title {
 }
 
 /* CODING PANEL */
-.tag-toggle-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 14px;
-}
-.tag-toggle {
-  padding: 5px 10px;
-  border-radius: 14px;
-  font-size: 11.5px;
-  font-weight: 600;
-  border: 1px solid var(--line);
-  background: var(--panel);
-  color: var(--ink-soft);
-}
-.tag-toggle.on {
-  /* Deliberately the same light blue for every tag, regardless of that
-     tag's own configured color (still used elsewhere as an identification
-     swatch — see FilterPanel.tsx's tag-dot and MatterDetail.tsx's tag chip)
-     — the coding toggle's own "applied" state isn't meant to double as a
-     per-tag color code. */
-  background: #d3e6fb;
-  border-color: #a9cdf5;
-  color: var(--navy);
-}
-/* Bulk mode only — some but not all of the selected documents already have
-   this code. A dashed border on the same light blue, not a fully solid
-   fill, so it reads as "partially applied" rather than "applied," even
-   though the coding button will still invert every selected document's own
-   state (not just add it uniformly) on the next click. */
-.tag-toggle.mixed {
-  background: #eef6fe;
-  border: 1px dashed #a9cdf5;
-  color: var(--navy);
-}
 /* LOGIN / LOADING SCREENS (apps/edd-workbench/client/src/main.tsx) */
 .matter-screen {
   height: 100vh;
@@ -976,14 +758,6 @@ h2.panel-title {
   color: var(--ink);
 }
 
-.custom-tag-row {
-  display: flex;
-  gap: 6px;
-}
-.custom-tag-row .search-box {
-  margin-bottom: 0;
-  flex: 1;
-}
 .bulk-note {
   background: var(--amber-soft);
   border: 1px solid #ead6a5;
@@ -994,15 +768,6 @@ h2.panel-title {
   margin-bottom: 12px;
 }
 
-/* RAG "Ask" question box (FilterPanel) and answer panel (AskResultPanel) */
-textarea.search-box {
-  resize: vertical;
-}
-.ask-row {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-}
 .ask-result-panel {
   border-top: 1px solid var(--line);
   padding-top: 16px;
@@ -1020,21 +785,6 @@ textarea.search-box {
   display: flex;
   flex-direction: column;
   gap: 4px;
-}
-.ask-relevant-document-btn {
-  width: 100%;
-  text-align: left;
-  font-size: 11.5px;
-  color: var(--ink-soft);
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  padding: 6px 9px;
-}
-.ask-relevant-document-btn:hover {
-  border-color: var(--navy);
-  color: var(--navy);
-  background: var(--navy-soft);
 }
 
 /* EMAIL PREVIEW (.eml / .msg) */
@@ -1064,61 +814,12 @@ textarea.search-box {
   margin-bottom: 10px;
 }
 
-.custom-tag-row {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 16px;
-}
-.custom-tag-row input {
-  flex: 1;
-  padding: 6px 8px;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  font-size: 12px;
-}
-.custom-tag-row button {
-  padding: 6px 12px;
-  border-radius: 4px;
-  border: 1px solid var(--navy);
-  background: var(--navy);
-  color: #fff;
-  font-weight: 600;
-  font-size: 12px;
-}
-
 /* Generic modal overlay — shared dialog chrome for any future
    confirmation-style dialog. No current consumer (ExportButtons dropped the
    fake confirmation modal the earlier ExportButton used — a real,
    selection-scoped export doesn't need one), kept for the next dialog that
    does. Escape-to-close, when used, belongs in the component itself (not
    pure CSS). */
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(27, 33, 48, 0.45);
-  z-index: 50;
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding-top: 8vh;
-}
-.modal-panel {
-  width: 480px;
-  max-width: 92vw;
-  max-height: 80vh;
-  overflow-y: auto;
-  background: var(--panel);
-  border-radius: 8px;
-  border: 1px solid var(--line);
-  box-shadow: 0 10px 40px rgba(27, 33, 48, 0.25);
-  padding: 22px 24px;
-}
-.modal-panel-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 6px;
-}
 
 ::-webkit-scrollbar {
   width: 10px;

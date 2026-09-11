@@ -1,4 +1,5 @@
 import type { AskResultDTO } from "./types";
+import { Button } from "antd";
 
 export interface AskResultPanelProps {
   result: AskResultDTO;
@@ -22,9 +23,9 @@ export function AskResultPanel({ result, onSelectDocument }: AskResultPanelProps
         <ul className="ask-relevant-documents">
           {result.relevantDocuments.map((doc) => (
             <li key={doc.documentId}>
-              <button type="button" className="ask-relevant-document-btn" onClick={() => onSelectDocument(doc.documentId)}>
+              <Button type="link" size="small" className="h-auto p-0 text-left" onClick={() => onSelectDocument(doc.documentId)}>
                 {doc.guid} — {doc.filename}
-              </button>
+              </Button>
             </li>
           ))}
         </ul>

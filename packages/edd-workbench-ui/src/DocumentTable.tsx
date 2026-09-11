@@ -319,7 +319,7 @@ export function DocumentTable({
       render: (_: unknown, doc: DocumentDTO) => (
         <button
           type="button"
-          className="row-delete-btn"
+          className="cursor-pointer border-0 bg-transparent px-1 text-base leading-none text-ink-soft hover:text-seal"
           aria-label={`Delete ${doc.originalFilename}`}
           onClick={(e) => {
             e.stopPropagation();

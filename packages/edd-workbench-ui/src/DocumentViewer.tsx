@@ -5,6 +5,7 @@ import type { DocumentDTO } from "./types";
 import { viewerKindFor } from "./viewers/viewerKind";
 import { PptxSlideViewer } from "./viewers/PptxSlideViewer";
 import { formatDate } from "./format";
+import { Segmented } from "antd";
 
 export interface DocumentViewerProps {
   api: ApiClient;
@@ -141,14 +142,17 @@ function XlsxViewer({ sheets }: { sheets: XlsxSheetView[] }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8, height: "100%" }}>
+      {/* Segmented rather than antd Tabs: these switch the table's data,
+          they don't own separate panels, and Segmented stays compact at this
+          density. */}
       {sheets.length > 1 && (
-        <div className="preview-sheet-tabs">
-          {sheets.map((s, i) => (
-            <button key={s.name} type="button" className={i === activeSheet ? "active" : ""} onClick={() => setActiveSheet(i)}>
-              {s.name}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          size="small"
+          className="mb-1.5 self-start"
+          value={activeSheet}
+          onChange={(value) => setActiveSheet(value as number)}
+          options={sheets.map((sheet, i) => ({ label: sheet.name, value: i }))}
+        />
       )}
       <div className="preview-table-wrap" style={{ flex: 1 }}>
         <table className="preview-table">

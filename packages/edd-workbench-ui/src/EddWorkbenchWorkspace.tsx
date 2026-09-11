@@ -254,11 +254,11 @@ function EddWorkbenchWorkspaceInner({ apiBaseUrl = "http://localhost:4430/api", 
           <div className="brand">
             <span className="mark">Co</span>
           </div>
-          <Button size="small" className="topbar-btn" onClick={() => setShowNotices(true)}>
+          <Button size="small" className="ml-auto" onClick={() => setShowNotices(true)}>
             Notices
           </Button>
           {onLogout && (
-            <Button size="small" className="topbar-btn" onClick={handleLogout}>
+            <Button size="small" className="ml-auto" onClick={handleLogout}>
               Log out
             </Button>
           )}
@@ -282,11 +282,11 @@ function EddWorkbenchWorkspaceInner({ apiBaseUrl = "http://localhost:4430/api", 
           <div className="brand">
             <span className="mark">Co</span>
           </div>
-          <Button size="small" className="topbar-btn" onClick={() => setShowNotices(true)}>
+          <Button size="small" className="ml-auto" onClick={() => setShowNotices(true)}>
             Notices
           </Button>
           {onLogout && (
-            <Button size="small" className="topbar-btn" onClick={handleLogout}>
+            <Button size="small" className="ml-auto" onClick={handleLogout}>
               Log out
             </Button>
           )}
@@ -318,7 +318,8 @@ function EddWorkbenchWorkspaceInner({ apiBaseUrl = "http://localhost:4430/api", 
         <div className="brand">
           {editingName ? (
             <Input
-              className="matter-name-input"
+              variant="borderless"
+              className="text-[15px] font-semibold"
               size="small"
               autoFocus
               value={nameInput}
@@ -340,26 +341,26 @@ function EddWorkbenchWorkspaceInner({ apiBaseUrl = "http://localhost:4430/api", 
           )}
         </div>
         {canCreateMatters && (
-          <Button size="small" className="topbar-btn ml-0" onClick={handleCreateMatter} loading={creating}>
+          <Button size="small" className="ml-0" onClick={handleCreateMatter} loading={creating}>
             Create Matter
           </Button>
         )}
         {canDownloadAuditLog && (
-          <Button size="small" className="topbar-btn ml-0" onClick={handleDownloadAuditLog} loading={downloadingAudit}>
+          <Button size="small" className="ml-0" onClick={handleDownloadAuditLog} loading={downloadingAudit}>
             Download Audit Log
           </Button>
         )}
         {canDeleteMatter && (
-          <Button size="small" className="topbar-btn ml-0" onClick={handleDeleteMatter} loading={deletingMatter}>
+          <Button size="small" className="ml-0" onClick={handleDeleteMatter} loading={deletingMatter}>
             Delete Matter
           </Button>
         )}
         <WorkerHealthBar api={api} matterId={selectedMatter.id} />
-        <Button size="small" className="topbar-btn" onClick={() => setShowNotices(true)}>
+        <Button size="small" className="ml-auto" onClick={() => setShowNotices(true)}>
           Notices
         </Button>
         {onLogout && (
-          <Button size="small" className="topbar-btn" onClick={handleLogout}>
+          <Button size="small" className="ml-auto" onClick={handleLogout}>
             Log out
           </Button>
         )}
